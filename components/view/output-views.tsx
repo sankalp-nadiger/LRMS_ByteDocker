@@ -83,10 +83,11 @@ const CommentModal = ({ isOpen, onClose, onSubmit, loading = false, step, userRo
   const inputRef = useRef<HTMLInputElement>(null);
 
   // Determine the modal title based on user role
-  const modalTitle = userRole === 'reviewer' 
-    ? `Send Message to Manager/Executioner - Step ${step}`
-    : `Send Message to Executioner - Step ${step}`;
-
+  const modalTitle = userRole === 'reviewer'
+  ? `Send Message to Manager/Executioner - Step ${step}`
+  : userRole === 'executioner'
+  ? `Send Message to Manager/Reviewer - Step ${step}`
+  : `Send Message to Executioner/Reviewer - Step ${step}`;
   // Fetch users when modal opens
   useEffect(() => {
     if (isOpen) {
