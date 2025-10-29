@@ -1721,7 +1721,7 @@ const handleSendComment = async (message: string, recipients: string[], isPushFo
 
         <div className="flex flex-col sm:flex-row sm:justify-center items-stretch sm:items-center gap-4 mt-6 pt-4 border-t">
             
-  {(role === 'manager' || role === 'admin' || role === 'executioner') && landRecordStatus !== 'review' && ( // ADD landRecordStatus check
+  {(role === 'manager' || role === 'admin' || role === 'executioner') && landRecordStatus !== 'review' && ( 
   <Button 
     onClick={async () => {
       if (!recordId || !user?.primaryEmailAddress?.emailAddress) return;

@@ -356,6 +356,7 @@ const FarmerCard = ({
     </Card>
   );
 };
+
 const normalizeForComparison = (panipatraks: Panipatrak[]) => {
   if (!panipatraks) return [];
   
@@ -365,26 +366,25 @@ const normalizeForComparison = (panipatraks: Panipatrak[]) => {
       slabId: pani.slabId,
       sNo: pani.sNo,
       year: pani.year,
+      sameForAll: pani.sameForAll || false,  // ⭐ Include sameForAll in comparison
       farmers: pani.farmers
         .filter(f => f?.name?.trim())
         .map(f => ({
           name: f.name.trim(),
           area: {
-            value: Math.round(f.area.value * 100) / 100, // Round to 2 decimals
+            value: Math.round(f.area.value * 100) / 100,
             unit: f.area.unit
           },
           type: f.type,
-          paikyNumber: f.paikyNumber ?? null, // Use null instead of undefined
+          paikyNumber: f.paikyNumber ?? null,
           ekatrikaranNumber: f.ekatrikaranNumber ?? null
         }))
-        // Stable sort by name then by type
         .sort((a, b) => {
           const nameCompare = a.name.localeCompare(b.name);
           if (nameCompare !== 0) return nameCompare;
           return (a.type || '').localeCompare(b.type || '');
         })
     }))
-    // Stable sort by slab then year
     .sort((a, b) => {
       const slabCompare = a.slabId.localeCompare(b.slabId);
       if (slabCompare !== 0) return slabCompare;
@@ -541,36 +541,81 @@ const getAllUniqueSlabNumbers = (slab: YearSlab) => {
 // Add this function to get current panipatraks
 const getCurrentPanipatraks = useCallback(() => {
   const panipatraks: Panipatrak[] = [];
-  Object.values(slabPanels).forEach(({ periods, slab }) => {
-    periods.forEach(p => {
+  
+  Object.values(slabPanels).forEach(({ periods, slab, sameForAll }) => {
+    // Get all years in this slab's range
+    const allYearsInSlab = [];
+    if (slab.startYear && slab.endYear) {
+      for (let y = slab.startYear; y < slab.endYear; y++) {
+        allYearsInSlab.push(y);
+      }
+    }
+
+    if (sameForAll && periods.length > 0) {
+      // For "same for all", use the first period's data for all years
+      const firstPeriod = periods[0];
       const allFarmers = [
-        ...p.regularFarmers,
-        ...p.paikies.flatMap(paiky => paiky.farmers),
-        ...p.ekatrikarans.flatMap(ek => ek.farmers)
+        ...firstPeriod.regularFarmers,
+        ...firstPeriod.paikies.flatMap(paiky => paiky.farmers),
+        ...firstPeriod.ekatrikarans.flatMap(ek => ek.farmers)
       ];
 
-      // Only include farmers with names (filter out empty farmers)
       const validFarmers = allFarmers.filter(f => f.name.trim());
 
       if (validFarmers.length > 0) {
-        panipatraks.push({
-          slabId: slab.id,
-          sNo: slab.sNo,
-          year: p.from,
-          farmers: validFarmers.map(f => ({
-            id: f.id,
-            name: f.name.trim(),
-            area: {
-              value: f.area.value || 0,
-              unit: f.area.unit
-            },
-            paikyNumber: f.paikyNumber,
-            ekatrikaranNumber: f.ekatrikaranNumber,
-            type: f.type
-          }))
+        // Create panipatrak for each year with sameForAll: true
+        allYearsInSlab.forEach(year => {
+          panipatraks.push({
+            slabId: slab.id,
+            sNo: slab.sNo,
+            year: year,
+            sameForAll: true,  // ⭐ Set to true for all years
+            farmers: validFarmers.map(f => ({
+              id: `${f.id}-copy-${year}`,
+              name: f.name.trim(),
+              area: {
+                value: f.area.value || 0,
+                unit: f.area.unit
+              },
+              paikyNumber: f.paikyNumber,
+              ekatrikaranNumber: f.ekatrikaranNumber,
+              type: f.type
+            }))
+          });
         });
       }
-    });
+    } else {
+      // Normal case - each period has its own data
+      periods.forEach(period => {
+        const allFarmers = [
+          ...period.regularFarmers,
+          ...period.paikies.flatMap(paiky => paiky.farmers),
+          ...period.ekatrikarans.flatMap(ek => ek.farmers)
+        ];
+
+        const validFarmers = allFarmers.filter(f => f.name.trim());
+
+        if (validFarmers.length > 0) {
+          panipatraks.push({
+            slabId: slab.id,
+            sNo: slab.sNo,
+            year: period.from,
+            sameForAll: false,  // ⭐ Set to false when not same for all
+            farmers: validFarmers.map(f => ({
+              id: f.id,
+              name: f.name.trim(),
+              area: {
+                value: f.area.value || 0,
+                unit: f.area.unit
+              },
+              paikyNumber: f.paikyNumber,
+              ekatrikaranNumber: f.ekatrikaranNumber,
+              type: f.type
+            }))
+          });
+        }
+      });
+    }
   });
   
   return panipatraks.sort((a, b) => {
@@ -578,6 +623,7 @@ const getCurrentPanipatraks = useCallback(() => {
     return a.year - b.year;
   });
 }, [slabPanels]);
+
 
 // Add this useMemo before the effect
 const currentNormalizedData = useMemo(() => {
@@ -602,8 +648,8 @@ useEffect(() => {
 }, [isInitialized, slabPanels, originalData.length]);
 
 
+
 const initializeFromYearSlabs = (slabs: YearSlab[], savedPanipatraks: Panipatrak[] = []) => {
-    // Clear existing state more aggressively
   setSlabPanels({});
   setExpandedSlabs({});
   setExpandedPeriods({});
@@ -625,12 +671,22 @@ const initializeFromYearSlabs = (slabs: YearSlab[], savedPanipatraks: Panipatrak
     const periods = getYearPeriods(slab);
     const slabPanipatraks = savedPanipatraks.filter(p => p.slabId === slab.id);
     
+    // ⭐ Check if this slab has same_for_all set to true
+    // All panipatraks in this slab should have sameForAll: true
+    const hasSameForAll = slabPanipatraks.length > 0 && 
+                          slabPanipatraks.every(p => p.sameForAll === true);
+    
+    console.log(`Slab ${slab.id} hasSameForAll:`, hasSameForAll);
+    
     newPanels[slab.id] = {
       slab,
-      sameForAll: false,
+      sameForAll: hasSameForAll,  // ⭐ Set based on saved data
       periods: periods.map(pr => {
-        // Find saved data for this specific period (year)
-        const savedData = slabPanipatraks.find(p => p.year === pr.from);
+        // ⭐ When sameForAll is true, use data from first year for all periods
+        const savedData = hasSameForAll 
+          ? slabPanipatraks.find(p => p.year === periods[0].from)
+          : slabPanipatraks.find(p => p.year === pr.from);
+        
         const allFarmers = savedData?.farmers || [];
         
         // Convert farmers to strict format
@@ -650,7 +706,7 @@ const initializeFromYearSlabs = (slabs: YearSlab[], savedPanipatraks: Panipatrak
             type: 'regular'
           }));
 
-        // Create paikies based on current slab data, not saved data
+        // Create paikies based on current slab data
         const paikies = slab.paiky && slab.paikyCount > 0 ? 
           Array.from({ length: slab.paikyCount }, (_, i) => {
             const paikyNumber = i + 1;
@@ -658,7 +714,6 @@ const initializeFromYearSlabs = (slabs: YearSlab[], savedPanipatraks: Panipatrak
               f.type === 'paiky' && f.paikyNumber === paikyNumber
             );
             
-            // Use saved farmers if they exist, otherwise create default
             const farmers = savedPaikyFarmers.length > 0 ? 
               savedPaikyFarmers.map(f => ({
                 id: f.id,
@@ -690,7 +745,7 @@ const initializeFromYearSlabs = (slabs: YearSlab[], savedPanipatraks: Panipatrak
             };
           }) : [];
 
-        // Create ekatrikarans based on current slab data, not saved data
+        // Create ekatrikarans based on current slab data
         const ekatrikarans = slab.ekatrikaran && slab.ekatrikaranCount > 0 ? 
           Array.from({ length: slab.ekatrikaranCount }, (_, i) => {
             const ekatrikaranNumber = i + 1;
@@ -698,7 +753,6 @@ const initializeFromYearSlabs = (slabs: YearSlab[], savedPanipatraks: Panipatrak
               f.type === 'ekatrikaran' && f.ekatrikaranNumber === ekatrikaranNumber
             );
             
-            // Use saved farmers if they exist, otherwise create default
             const farmers = savedEkatrikaranFarmers.length > 0 ? 
               savedEkatrikaranFarmers.map(f => ({
                 id: f.id,
@@ -807,35 +861,76 @@ function deepEqual(x: any, y: any): boolean {
   return x === y;
 }
 // Change this effect to prevent infinite updates
+
 useEffect(() => {
   if (!isInitialized) return;
 
   const panipatraks: Panipatrak[] = [];
-  Object.values(slabPanels).forEach(({ periods, slab }) => {
-    periods.forEach(p => {
+  Object.values(slabPanels).forEach(({ periods, slab, sameForAll }) => {
+    // Get all years in this slab
+    const allYearsInSlab = [];
+    if (slab.startYear && slab.endYear) {
+      for (let y = slab.startYear; y < slab.endYear; y++) {
+        allYearsInSlab.push(y);
+      }
+    }
+
+    if (sameForAll && periods.length > 0) {
+      // Use first period data for all years
+      const firstPeriod = periods[0];
       const allFarmers = [
-        ...p.regularFarmers,
-        ...p.paikies.flatMap(paiky => paiky.farmers),
-        ...p.ekatrikarans.flatMap(ek => ek.farmers)
+        ...firstPeriod.regularFarmers,
+        ...firstPeriod.paikies.flatMap(paiky => paiky.farmers),
+        ...firstPeriod.ekatrikarans.flatMap(ek => ek.farmers)
       ];
 
-      panipatraks.push({
-        slabId: slab.id,
-        sNo: slab.sNo,
-        year: p.from,
-        farmers: allFarmers.map(f => ({
-          id: f.id,
-          name: f.name.trim(),
-          area: {
-            value: f.area.value || 0,
-            unit: f.area.unit
-          },
-          paikyNumber: f.paikyNumber,
-          ekatrikaranNumber: f.ekatrikaranNumber,
-          type: f.type
-        }))
+      allYearsInSlab.forEach(year => {
+        panipatraks.push({
+          slabId: slab.id,
+          sNo: slab.sNo,
+          year: year,
+          sameForAll: true,  // ⭐ Set to true
+          farmers: allFarmers.map(f => ({
+            id: `${f.id}-copy-${year}`,
+            name: f.name.trim(),
+            area: {
+              value: f.area.value || 0,
+              unit: f.area.unit
+            },
+            paikyNumber: f.paikyNumber,
+            ekatrikaranNumber: f.ekatrikaranNumber,
+            type: f.type
+          }))
+        });
       });
-    });
+    } else {
+      // Normal case
+      periods.forEach(p => {
+        const allFarmers = [
+          ...p.regularFarmers,
+          ...p.paikies.flatMap(paiky => paiky.farmers),
+          ...p.ekatrikarans.flatMap(ek => ek.farmers)
+        ];
+
+        panipatraks.push({
+          slabId: slab.id,
+          sNo: slab.sNo,
+          year: p.from,
+          sameForAll: false,  // ⭐ Set to false
+          farmers: allFarmers.map(f => ({
+            id: f.id,
+            name: f.name.trim(),
+            area: {
+              value: f.area.value || 0,
+              unit: f.area.unit
+            },
+            paikyNumber: f.paikyNumber,
+            ekatrikaranNumber: f.ekatrikaranNumber,
+            type: f.type
+          }))
+        });
+      });
+    }
   });
 
   // Only update if there are actual changes

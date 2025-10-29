@@ -88,6 +88,7 @@ export interface Panipatrak {
   slabId: string;
   sNo: string;
   year: number;
+  sameForAll?: boolean;
   farmers: FarmerStrict[];
 }
 
@@ -316,6 +317,7 @@ static async getLandRecordBasicInfo(landRecordId: string): Promise<{
     reSurveyNo: data.re_survey_no
   };
 }
+
   // Get land record by ID
   static async getLandRecord(id: string): Promise<{ data: any, error: any }> {
     const { data, error } = await supabase
@@ -813,8 +815,8 @@ static async getNondhsforDetails(landRecordId: string) {
   }
 }
 
-  // Save nondhs
-  static async saveNondhs(landRecordId: string, nondhs: Nondh[]): Promise<{ data: any, error: any }> {
+// Save nondhs
+static async saveNondhs(landRecordId: string, nondhs: Nondh[]): Promise<{ data: any, error: any }> {
   try {
     // First, delete existing nondhs for this land record
     await supabase
@@ -948,12 +950,15 @@ static async getYearSlabs(landRecordId: string): Promise<{ data: YearSlabData[] 
     return { data: null, error };
   }
 }
+
 static async savePanipatraks(
   landRecordId: string,
-  panipatraks: Panipatrak[]
+  panipatraks: Panipatrak[],
+  sameForAllYears?: number[]  // Keep for backward compatibility
 ) {
   try {
     console.log("Received panipatraks:", panipatraks.length);
+    console.log("Same for all years:", sameForAllYears);
     
     // First delete existing records
     const { data: existing, error: fetchError } = await supabase
@@ -988,7 +993,8 @@ static async savePanipatraks(
         land_record_id: landRecordId,
         year_slab_id: p.slabId,
         s_no: p.sNo,
-        year: p.year
+        year: p.year,
+        same_for_all: p.sameForAll || false  // Use the field from each panipatrak
       })))
       .select('id');
 
@@ -1026,11 +1032,11 @@ static async getPanipatraks(landRecordId: string) {
   try {
     console.log('[DEBUG] Starting getPanipatraks for:', landRecordId);
     
-    const { data: panipatraks, error: paniError } = await supabase
-      .from('panipatraks')
-      .select('id, year_slab_id, s_no, year')
-      .eq('land_record_id', landRecordId)
-      .order('year', { ascending: true });
+   const { data: panipatraks, error: paniError } = await supabase
+  .from('panipatraks')
+  .select('id, year_slab_id, s_no, year, same_for_all')
+  .eq('land_record_id', landRecordId)
+  .order('year', { ascending: true });
 
     console.log('[DEBUG] Panipatraks query result:', { data: panipatraks, error: paniError });
     
@@ -1069,6 +1075,7 @@ static async getPanipatraks(landRecordId: string) {
         slabId: panipatrak.year_slab_id,
         sNo: panipatrak.s_no,
         year: panipatrak.year,
+        sameForAll: panipatrak.same_for_all || false,
         farmers: panipatrakFarmers.map(f => {
           // Deduce farmer type based on numbers
           let type: 'regular' | 'paiky' | 'ekatrikaran' = 'regular';
@@ -1123,6 +1130,7 @@ static async updatePanipatraks(
       slabId: pani.slabId,
       sNo: pani.sNo,
       year: pani.year,
+      sameForAll: pani.sameForAll || false,  // ⭐ Include sameForAll field
       farmers: pani.farmers.map(farmer => ({
         name: farmer.name,
         area: {
@@ -1138,16 +1146,17 @@ static async updatePanipatraks(
     console.log('[DEBUG] Calling stored procedure with:', panipatraksJson);
 
     const { data, error } = await supabase.rpc('update_panipatraks', {
-  p_land_record_id: landRecordId,
-  panipatraks_data: panipatraksJson
-});
+      p_land_record_id: landRecordId,
+      panipatraks_data: panipatraksJson
+    });
 
-console.log('[DEBUG] Raw Supabase response:', { data, error });
+    console.log('[DEBUG] Raw Supabase response:', { data, error });
 
-// Check if the procedure returned an error in the data
-if (data?.error) {
-  throw new Error(data.error);
-}
+    // Check if the procedure returned an error in the data
+    if (data?.error) {
+      throw new Error(data.error);
+    }
+    
     return { data, error: null };
   } catch (error) {
     console.error('[ERROR] updatePanipatraks failed:', error);

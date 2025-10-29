@@ -73,6 +73,7 @@ CREATE TABLE panipatraks (
     year_slab_id UUID REFERENCES year_slabs(id) ON DELETE CASCADE,
     s_no VARCHAR(255) NOT NULL,
     year INTEGER NOT NULL,
+    same_for_all INTEGER[] DEFAULT '{}',
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 

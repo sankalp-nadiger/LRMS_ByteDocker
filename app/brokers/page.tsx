@@ -488,7 +488,7 @@ export default function BrokerDashboard() {
                               )}
                               <Link href={`/brokers/update/${broker.id}`}>
                                 <Button variant="outline" size="sm">
-                                  Update
+                                  View/Update
                                 </Button>
                               </Link>
                             </div>
@@ -555,7 +555,7 @@ export default function BrokerDashboard() {
 
                         <Link href={`/brokers/update/${broker.id}`}>
                           <Button variant="outline" size="sm">
-                            Update
+                            View/Update
                           </Button>
                         </Link>
                       </div>
