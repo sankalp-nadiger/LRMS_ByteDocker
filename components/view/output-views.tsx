@@ -449,7 +449,7 @@ const handleSendComment = async (message: string, recipients: string[], isReview
       ? `to ${toEmails.length} recipient(s)` 
       : role === 'reviewer' 
         ? 'to all managers/executioners'
-        : 'to all executioners';
+        : 'to all executioners/reviewers';
 
     await createActivityLog({
       user_email: user.primaryEmailAddress.emailAddress,
@@ -470,11 +470,11 @@ const handleSendComment = async (message: string, recipients: string[], isReview
           land_record_id: recordId,
           step: 6,
           chat_id: null,
-          description: 'Reviewer marked the review as complete. Status changed to Query.'
+          description: 'Reviewer marked the review as complete.'
         });
 
         setLandRecordStatus('query'); // UPDATE LOCAL STATE
-        toast({ title: "Review marked as complete. Status changed to Query." });
+        toast({ title: "Review marked as complete." });
         refreshStatus();
       } else {
         // Manager/Admin/Executioner pushing for review
@@ -1750,7 +1750,7 @@ const getUniqueSNosWithTypes = () => {
 
          <div className="flex flex-col sm:flex-row sm:justify-center items-stretch sm:items-center gap-4 mt-6 pt-4 border-t">
   {role === 'reviewer' ? (
-    landRecordStatus === 'review' && ( // ADD THIS CONDITION
+    landRecordStatus === 'review' && (
       <Button 
         onClick={async () => {
           if (!recordId || !user?.primaryEmailAddress?.emailAddress) return;
@@ -1761,10 +1761,10 @@ const getUniqueSNosWithTypes = () => {
               land_record_id: recordId,
               step: 6,
               chat_id: null,
-              description: 'Reviewer marked the review as complete. Status changed to Query.'
+              description: 'Reviewer marked the review as complete.'
             });
-            setLandRecordStatus('query'); // UPDATE LOCAL STATE
-            toast({ title: "Review marked as complete. Status changed to Query." });
+            setLandRecordStatus('query');
+            toast({ title: "Review marked as complete." });
             refreshStatus();
             router.push('/land-master');
           } catch (error) {
@@ -1779,7 +1779,7 @@ const getUniqueSNosWithTypes = () => {
       </Button>
     )
   ) : (role === 'manager' || role === 'admin' || role === 'executioner') && (
-    landRecordStatus !== 'review' && ( // ADD THIS CONDITION
+    landRecordStatus !== 'review' && (
       <Button 
         onClick={async () => {
           if (!recordId || !user?.primaryEmailAddress?.emailAddress) return;
