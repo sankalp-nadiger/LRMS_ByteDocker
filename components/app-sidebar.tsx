@@ -1,6 +1,6 @@
 "use client"
 
-import { Building2, FileText, Home, Layers, MapPin, Users, BookOpen, Search } from "lucide-react"
+import { Building2, FolderKanban, Home, Layers, MapPin, Users, BookOpen, Sprout, Clock, HomeIcon } from "lucide-react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { useEffect } from "react"
@@ -29,6 +29,11 @@ const menuItems = [
   //   url: "/land-master",
   //   icon: MapPin,
   // },
+   {
+    title: "Dashboard",
+    url: "/",
+    icon: HomeIcon,
+  },
   {
     title: "Land Master",
     url: "/land-master",
@@ -42,8 +47,9 @@ const menuItems = [
   // {
   //   title: "Panipatrak Registry",
   //   url: "/panipatrak",
-  //   icon: Users,
+  //   icon: Sprout,
   // },
+   
   // {
   //   title: "Land Notice (Nondh)",
   //   icon: FileText,
@@ -67,6 +73,16 @@ const menuItems = [
     title: "Brokers",
     url: "/brokers",
     icon: Users,
+  },
+  {
+    title: "Timeline Logs",
+    url: "/timeline",
+    icon: Clock,
+  },
+  {
+    title: "Projects",
+    url: "/projects",
+    icon: FolderKanban, // visually represents grouped land records
   },
   // {
   //   title: "Reports & Queries",

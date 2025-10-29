@@ -18,7 +18,8 @@ import {
   SlabEntry,
   Panipatrak,
 } from "@/contexts/land-record-context";
-import { LandRecordService } from "@/lib/supabase"; 
+import { LandRecordService, createActivityLog } from "@/lib/supabase";
+import { useUser } from "@clerk/nextjs";
 import { toast } from "@/hooks/use-toast";
 import { convertToSquareMeters, convertFromSquareMeters } from "@/lib/supabase";
 import { useStepFormData } from "@/hooks/use-step-form-data";
@@ -394,6 +395,7 @@ const normalizeForComparison = (panipatraks: Panipatrak[]) => {
 export default function PanipatrakStep() {
   const { yearSlabs, setCurrentStep, currentStep, landBasicInfo, panipatraks, // get panipatraks from context
   setPanipatraks, recordId } = useLandRecord();
+  const { user } = useUser();
   const { getStepData, updateStepData } = useStepFormData(3);
   const [loading, setLoading] = useState(false);
   const [isInitialized, setIsInitialized] = useState(false);
@@ -1089,7 +1091,21 @@ const updateFarmer = (
 
     console.log('Updated panipatraks from DB:', updatedPanipatraks);
 
-    // 3. Update all state
+    // 3. Update land record status and create activity log
+    await LandRecordService.updateLandRecord(recordId, {
+      status: "drafting",
+      current_step: currentStep
+    });
+
+    await createActivityLog({
+      user_email: user?.primaryEmailAddress?.emailAddress || "",
+      land_record_id: recordId,
+      step: currentStep,
+      chat_id: null,
+      description: `Updated panipatrak entries`
+    });
+
+    // 4. Update all state
     setPanipatraks(updatedPanipatraks);
     updateStepData({ panipatraks: updatedPanipatraks });
     setOriginalData(normalizeForComparison(updatedPanipatraks));

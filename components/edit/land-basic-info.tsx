@@ -1,12 +1,12 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, useRef } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Upload, Save } from "lucide-react"
+import { Upload, Save, Send, X, Loader2 } from "lucide-react"
 import { useLandRecord } from "@/contexts/land-record-context"
 import { supabase, uploadFile } from "@/lib/supabase"
 import { useToast } from "@/hooks/use-toast"
@@ -14,7 +14,11 @@ import { LandRecordService } from "@/lib/supabase"
 import { promulgationData, getDistricts, getTalukas, getVillages, isPromulgation } from "@/lib/mock-data"
 import { useStepFormData } from "@/hooks/use-step-form-data"
 import type { LandBasicInfo } from "@/contexts/land-record-context"
-import { convertToSquareMeters, convertFromSquareMeters } from "@/lib/supabase";
+import { convertToSquareMeters, convertFromSquareMeters } from "@/lib/supabase"
+import { useUser } from "@clerk/nextjs"
+import { createActivityLog, createChat } from "@/lib/supabase"
+import { useUserRole } from '@/contexts/user-context'
+import { useRouter } from "next/navigation"
 
 const initialFormData: LandBasicInfo = {
   district: "",
@@ -58,6 +62,228 @@ interface AreaFieldsProps {
   disabled?: boolean;
 }
 
+interface User {
+  id: string;
+  email: string;
+  fullName: string;
+  role: string;
+}
+
+// Comment Modal Component
+interface CommentModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  onSubmit: (message: string, recipients: string[]) => Promise<void>;
+  loading?: boolean;
+  step: number;
+}
+
+const CommentModal = ({ isOpen, onClose, onSubmit, loading = false, step }: CommentModalProps) => {
+  const [message, setMessage] = useState('');
+  const [showMentionDropdown, setShowMentionDropdown] = useState(false);
+  const [mentionSearch, setMentionSearch] = useState('');
+  const [selectedRecipients, setSelectedRecipients] = useState<string[]>([]);
+  const [cursorPosition, setCursorPosition] = useState(0);
+  const [users, setUsers] = useState<User[]>([]);
+  const { user } = useUser();
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // Fetch users when modal opens
+  useEffect(() => {
+    if (isOpen) {
+      const fetchUsers = async () => {
+        try {
+          const response = await fetch('/api/users/list');
+          if (!response.ok) throw new Error('Failed to fetch users');
+          const data = await response.json();
+          setUsers(data.users);
+        } catch (error) {
+          console.error('Error fetching users:', error);
+        }
+      };
+      fetchUsers();
+      // Reset state when modal opens
+      setMessage('');
+      setSelectedRecipients([]);
+      setShowMentionDropdown(false);
+    }
+  }, [isOpen]);
+
+  const handleMessageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    const position = e.target.selectionStart || 0;
+    
+    setMessage(value);
+    setCursorPosition(position);
+
+    // Check for @ mention
+    const textBeforeCursor = value.substring(0, position);
+    const lastAtIndex = textBeforeCursor.lastIndexOf('@');
+    
+    if (lastAtIndex !== -1) {
+      const afterAt = textBeforeCursor.substring(lastAtIndex + 1);
+      const beforeAt = textBeforeCursor.substring(0, lastAtIndex);
+      if (beforeAt === '' || beforeAt.endsWith(' ')) {
+        setMentionSearch(afterAt);
+        setShowMentionDropdown(true);
+        return;
+      }
+    }
+    
+    setShowMentionDropdown(false);
+  };
+
+  const handleMentionSelect = (userEmail: string, userName: string) => {
+    const textBeforeCursor = message.substring(0, cursorPosition);
+    const textAfterCursor = message.substring(cursorPosition);
+    const lastAtIndex = textBeforeCursor.lastIndexOf('@');
+    
+    const beforeMention = message.substring(0, lastAtIndex);
+    const newText = beforeMention + `@${userName} ` + textAfterCursor;
+    
+    setMessage(newText);
+    setSelectedRecipients([...selectedRecipients, userEmail]);
+    setShowMentionDropdown(false);
+    setMentionSearch('');
+    
+    setTimeout(() => {
+      inputRef.current?.focus();
+    }, 0);
+  };
+
+  const removeMention = (email: string) => {
+    setSelectedRecipients(selectedRecipients.filter(e => e !== email));
+  };
+
+  const getUserByEmail = (email: string) => {
+    return users.find(u => u.email === email);
+  };
+
+  const filteredUsers = users
+    .filter(u => u.email !== user?.primaryEmailAddress?.emailAddress)
+    .filter(u => !selectedRecipients.includes(u.email))
+    .filter(u => 
+      mentionSearch === '' || 
+      u.fullName.toLowerCase().includes(mentionSearch.toLowerCase()) ||
+      u.email.toLowerCase().includes(mentionSearch.toLowerCase())
+    );
+
+  const handleSubmit = async () => {
+    if (!message.trim()) return;
+    await onSubmit(message, selectedRecipients);
+    setMessage('');
+    setSelectedRecipients([]);
+  };
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+      <Card className="w-full max-w-lg max-h-[80vh] overflow-hidden flex flex-col">
+        <CardHeader className="flex-shrink-0 border-b bg-white sticky top-0 z-10">
+          <div className="flex justify-between items-center">
+            <CardTitle>Send Message to Executioner - Step {step}</CardTitle>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={onClose}
+              disabled={loading}
+            >
+              <X className="w-4 h-4" />
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-4 overflow-y-auto flex-1 p-6 pt-4">
+          {/* Selected Recipients Pills */}
+          {selectedRecipients.length > 0 && (
+            <div className="flex flex-wrap gap-2 mb-2">
+              {selectedRecipients.map(email => {
+                const recipient = getUserByEmail(email);
+                return (
+                  <span key={email} className="inline-flex items-center gap-1 px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-sm">
+                    {recipient?.fullName || email}
+                    <button
+                      onClick={() => removeMention(email)}
+                      className="hover:text-blue-900 text-xs"
+                    >
+                      ×
+                    </button>
+                  </span>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Message Input */}
+          <div className="space-y-2">
+            <Label htmlFor="comment-message">Message</Label>
+            <div className="relative">
+              <input
+                ref={inputRef}
+                id="comment-message"
+                type="text"
+                value={message}
+                onChange={handleMessageChange}
+                placeholder="Type @ to mention someone or send to all executioners..."
+                disabled={loading}
+                onKeyPress={(e) => e.key === 'Enter' && !showMentionDropdown && handleSubmit()}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              />
+
+              {/* Mention Dropdown */}
+              {showMentionDropdown && filteredUsers.length > 0 && (
+                <div className="absolute top-full left-0 mt-1 w-full bg-white border border-gray-300 rounded-lg shadow-lg max-h-48 overflow-y-auto z-20">
+                  {filteredUsers.map(u => (
+                    <button
+                      key={u.id}
+                      onClick={() => handleMentionSelect(u.email, u.fullName)}
+                      className="w-full text-left px-4 py-2 hover:bg-gray-100 flex items-center justify-between border-b border-gray-100 last:border-b-0"
+                    >
+                      <div className="flex flex-col items-start">
+                        <span className="font-medium text-sm">{u.fullName}</span>
+                        <span className="text-xs text-gray-500">{u.email}</span>
+                      </div>
+                      <span className="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded">
+                        {u.role.charAt(0).toUpperCase() + u.role.slice(1)}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            <p className="text-xs text-gray-500">
+              Type @ to mention specific users, or send to all executioners
+            </p>
+          </div>
+          
+          <div className="flex gap-2 pt-4">
+            <Button
+              variant="outline"
+              onClick={onClose}
+              disabled={loading}
+              className="flex-1"
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleSubmit}
+              disabled={loading || !message.trim()}
+              className="flex-1 flex items-center gap-2"
+            >
+              {loading ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <Send className="w-4 h-4" />
+              )}
+              Send Message
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+};
+
 const AreaFields = ({ area, onChange, disabled = false }: AreaFieldsProps) => {
   // Define constants
   const SQM_PER_GUNTHA = 101.17;
@@ -79,7 +305,7 @@ const AreaFields = ({ area, onChange, disabled = false }: AreaFieldsProps) => {
 
   // Calculate display values based on current area with rounded sq_m
   const displayValues = {
-    sq_m: Math.round((area.value || 0) * 100) / 100, // Round to 2 decimal places
+    sq_m: Math.round((area.value || 0) * 100) / 100,
     acre: Math.floor(convertFromSquareMeters(area.value || 0, "acre")),
     guntha: Math.round(convertFromSquareMeters(area.value || 0, "guntha") % 40)
   };
@@ -132,7 +358,7 @@ const AreaFields = ({ area, onChange, disabled = false }: AreaFieldsProps) => {
     if (!isNaN(num)) {
       const guntha = area.gunthas || 0;
       const totalSqm = Math.round((convertToSquareMeters(num, "acre") + 
-                      convertToSquareMeters(guntha, "guntha")) * 100) / 100; // Round to 2 decimal places
+                      convertToSquareMeters(guntha, "guntha")) * 100) / 100;
       onChange({ 
         ...area, 
         value: totalSqm,
@@ -162,13 +388,12 @@ const AreaFields = ({ area, onChange, disabled = false }: AreaFieldsProps) => {
     if (!isNaN(num)) {
       if (num >= 40) {
         num = 39;
-        // You might want to add toast here if needed
         console.warn("Guntha must be less than 40");
       }
       
       const acre = area.acres || 0;
       const totalSqm = Math.round((convertToSquareMeters(acre, "acre") + 
-                      convertToSquareMeters(num, "guntha")) * 100) / 100; // Round to 2 decimal places
+                      convertToSquareMeters(num, "guntha")) * 100) / 100;
       onChange({ 
         ...area, 
         value: totalSqm,
@@ -188,7 +413,6 @@ const AreaFields = ({ area, onChange, disabled = false }: AreaFieldsProps) => {
     <div className="space-y-4">
       {/* On mobile: Stack all fields vertically */}
       <div className="md:hidden space-y-4">
-        {/* Unit Selector */}
         <div className="space-y-2 w-full">
           <Label>Unit</Label>
           <Select
@@ -212,7 +436,6 @@ const AreaFields = ({ area, onChange, disabled = false }: AreaFieldsProps) => {
           </Select>
         </div>
 
-        {/* Primary Field */}
         {area.unit === "sq_m" ? (
           <div className="space-y-2 w-full">
             <Label>Square Meters</Label>
@@ -264,7 +487,6 @@ const AreaFields = ({ area, onChange, disabled = false }: AreaFieldsProps) => {
           </>
         )}
 
-        {/* Secondary Fields */}
         {area.unit === "sq_m" ? (
           <>
             <div className="space-y-2 w-full">
@@ -319,7 +541,6 @@ const AreaFields = ({ area, onChange, disabled = false }: AreaFieldsProps) => {
 
       {/* On desktop: Original single-row layout with better spacing */}
       <div className="hidden md:flex items-end gap-6">
-        {/* Unit Selector */}
         <div className="space-y-2 w-[140px] flex-shrink-0">
           <Label>Unit</Label>
           <Select
@@ -343,7 +564,6 @@ const AreaFields = ({ area, onChange, disabled = false }: AreaFieldsProps) => {
           </Select>
         </div>
 
-        {/* Primary Fields */}
         {area.unit === "sq_m" ? (
           <div className="space-y-2 min-w-[150px] flex-1">
             <Label>Square Meters</Label>
@@ -395,7 +615,6 @@ const AreaFields = ({ area, onChange, disabled = false }: AreaFieldsProps) => {
           </>
         )}
 
-        {/* Secondary Fields */}
         {area.unit === "sq_m" ? (
           <>
             <div className="space-y-2 min-w-[120px] flex-1">
@@ -456,80 +675,86 @@ export default function LandBasicInfoComponent() {
     recordId,
     setHasUnsavedChanges, 
     currentStep, 
-    hasUnsavedChanges 
+    hasUnsavedChanges,
+    refreshStatus
   } = useLandRecord()
   const { toast } = useToast()
+  const { user } = useUser()
+  const { role } = useUserRole()
+  const router = useRouter()
 
   const [loading, setLoading] = useState(false)
   const [uploadedFileName, setUploadedFileName] = useState<string>("")
   const [formData, setFormData] = useState<LandBasicInfo>(initialFormData)
   const [originalData, setOriginalData] = useState<LandBasicInfo>(initialFormData)
   const [isDataLoaded, setIsDataLoaded] = useState(false)
+  const [showCommentModal, setShowCommentModal] = useState(false)
+  const [sendingComment, setSendingComment] = useState(false)
+  const [showNavigationModal, setShowNavigationModal] = useState(false)
 
   // Check if form has changes
   const hasChanges = !isEqual(formData, originalData)
 
   // Fetch existing land record data
   useEffect(() => {
-  const fetchLandRecord = async () => {
-    if (!recordId) {
-      setIsDataLoaded(true)
-      return
-    }
-
-    try {
-      setLoading(true)
-      const { data, error } = await LandRecordService.getLandRecord(recordId)
-      
-      if (error) throw error
-      
-      if (data) {
-        // Since we're always storing sqm in database, convert back to user's preferred unit
-        const areaValueSqm = data.area_value || 0;
-        
-        const mappedData: LandBasicInfo = {
-          id: data.id,
-          district: data.district || "",
-          taluka: data.taluka || "",
-          village: data.village || "",
-          area: { 
-            value: areaValueSqm, // Always load as sqm value
-            unit: "sq_m", // Default to sq_m since that's what we store
-            acres: areaValueSqm ? Math.floor(areaValueSqm / 4046.86) : undefined,
-            gunthas: areaValueSqm ? Math.round((areaValueSqm / 101.17) % 40) : undefined,
-            square_meters: areaValueSqm,
-            sq_m: areaValueSqm // Add this for consistency with AreaFields component
-          },
-          sNoType: data.s_no_type || "s_no",
-          sNo: data.s_no || "",
-          isPromulgation: data.is_promulgation || false,
-          blockNo: data.block_no || "",
-          reSurveyNo: data.re_survey_no || "",
-          integrated712: data.integrated_712 || "",
-          integrated712FileName: data.integrated_712_filename || ""
-        }
-        
-        setFormData(mappedData)
-        setOriginalData(mappedData)
-        
-        if (mappedData.integrated712FileName) {
-          setUploadedFileName(mappedData.integrated712FileName)
-        }
+    const fetchLandRecord = async () => {
+      if (!recordId) {
+        setIsDataLoaded(true)
+        return
       }
-    } catch (error) {
-      console.error('Error fetching land record:', error)
-      toast({ 
-        title: "Error loading land record", 
-        variant: "destructive" 
-      })
-    } finally {
-      setLoading(false)
-      setIsDataLoaded(true)
-    }
-  }
 
-  fetchLandRecord()
-}, [recordId, toast])
+      try {
+        setLoading(true)
+        const { data, error } = await LandRecordService.getLandRecord(recordId)
+        
+        if (error) throw error
+        
+        if (data) {
+          const areaValueSqm = data.area_value || 0;
+          
+          const mappedData: LandBasicInfo = {
+            id: data.id,
+            district: data.district || "",
+            taluka: data.taluka || "",
+            village: data.village || "",
+            area: { 
+              value: areaValueSqm,
+              unit: "sq_m",
+              acres: areaValueSqm ? Math.floor(areaValueSqm / 4046.86) : undefined,
+              gunthas: areaValueSqm ? Math.round((areaValueSqm / 101.17) % 40) : undefined,
+              square_meters: areaValueSqm,
+              sq_m: areaValueSqm
+            },
+            sNoType: data.s_no_type || "s_no",
+            sNo: data.s_no || "",
+            isPromulgation: data.is_promulgation || false,
+            blockNo: data.block_no || "",
+            reSurveyNo: data.re_survey_no || "",
+            integrated712: data.integrated_712 || "",
+            integrated712FileName: data.integrated_712_filename || ""
+          }
+          
+          setFormData(mappedData)
+          setOriginalData(mappedData)
+          
+          if (mappedData.integrated712FileName) {
+            setUploadedFileName(mappedData.integrated712FileName)
+          }
+        }
+      } catch (error) {
+        console.error('Error fetching land record:', error)
+        toast({ 
+          title: "Error loading land record", 
+          variant: "destructive" 
+        })
+      } finally {
+        setLoading(false)
+        setIsDataLoaded(true)
+      }
+    }
+
+    fetchLandRecord()
+  }, [recordId, toast])
 
   // Update unsaved changes status
   useEffect(() => {
@@ -633,81 +858,156 @@ export default function LandBasicInfoComponent() {
     setUploadedFileName("")
   }
 
+  // Handle comment submission
+  const handleSendComment = async (message: string, recipients: string[]) => {
+    if (!formData.id || !user?.primaryEmailAddress?.emailAddress) return;
+
+    try {
+      setSendingComment(true);
+
+      const toEmails = recipients.length > 0 ? recipients : null;
+
+      const chatData = await createChat({
+        from_email: user.primaryEmailAddress.emailAddress,
+        to_email: toEmails,
+        message: message,
+        land_record_id: formData.id,
+        step: 1
+      });
+
+      const recipientText = toEmails 
+        ? `to ${toEmails.length} recipient(s)` 
+        : 'to all executioners';
+
+      await createActivityLog({
+        user_email: user.primaryEmailAddress.emailAddress,
+        land_record_id: formData.id,
+        step: 1,
+        chat_id: chatData.id,
+        description: `Sent message ${recipientText}: ${message}`
+      });
+
+      toast({ title: "Message sent successfully" });
+      setShowCommentModal(false);
+      setShowNavigationModal(true);
+    } catch (error) {
+      console.error('Error sending comment:', error);
+      toast({ 
+        title: "Error sending message", 
+        variant: "destructive" 
+      });
+    } finally {
+      setSendingComment(false);
+    }
+  };
+
+  // Handle skipping comment modal
+  const handleSkipComment = () => {
+    setShowCommentModal(false);
+    setShowNavigationModal(true);
+  };
+
+  // Handle navigation after saving
+  const handleContinueToStep2 = () => {
+    router.push(`/land-master/forms?mode=edit&id=${recordId}&step=2`);
+    setShowCommentModal(false);
+    setShowNavigationModal(false);
+  };
+
+  const handleBackToLandMaster = () => {
+    router.push('/land-master');
+    setShowCommentModal(false);
+    setShowNavigationModal(false);
+  };
+
   // Save changes
-const handleSave = async () => {
-  // Validate area based on unit type
-  const hasValidArea = (() => {
-    if (formData.area.unit === 'sq_m') {
-      return formData.area.value && formData.area.value > 0;
-    } else if (formData.area.unit === 'acre_guntha') {
-      return (formData.area.acres && formData.area.acres > 0) || 
-             (formData.area.gunthas && formData.area.gunthas > 0);
-    }
-    return false;
-  })();
+  const handleSave = async () => {
+    // Validate area based on unit type
+    const hasValidArea = (() => {
+      if (formData.area.unit === 'sq_m') {
+        return formData.area.value && formData.area.value > 0;
+      } else if (formData.area.unit === 'acre_guntha') {
+        return (formData.area.acres && formData.area.acres > 0) || 
+               (formData.area.gunthas && formData.area.gunthas > 0);
+      }
+      return false;
+    })();
 
-  if (!hasValidArea) {
-    toast({ title: "Please enter a valid area", variant: "destructive" })
-    return
-  }
-
-  if (!formData.district || !formData.taluka || !formData.village || !formData.blockNo) {
-    toast({ title: "Please fill all required fields", variant: "destructive" })
-    return
-  }
-  if (formData.isPromulgation && !formData.reSurveyNo) {
-    toast({ title: "Re Survey No is required for Promulgation", variant: "destructive" })
-    return
-  }
-
-  setLoading(true)
-  try {
-    // Always save square meters value, regardless of unit chosen
-    let areaValueInSqm = 0;
-    
-    if (formData.area.unit === 'acre_guntha') {
-      // Use the calculated sq_m value from AreaFields component
-      areaValueInSqm = formData.area.sq_m || 0;
-    } else if (formData.area.unit === 'sq_m') {
-      // Use the value directly for sq_m unit
-      areaValueInSqm = formData.area.value || 0;
+    if (!hasValidArea) {
+      toast({ title: "Please enter a valid area", variant: "destructive" })
+      return
     }
 
-    // Map form data to database schema for UPDATE
-    const updateData = {
-      district: formData.district,
-      taluka: formData.taluka,
-      village: formData.village,
-      area_value: areaValueInSqm, // Always save sqm value
-      area_unit: 'sq_m', // Always save as sq_m in database
-      s_no_type: formData.sNoType || 's_no',
-      s_no: formData.sNo || formData.blockNo,
-      is_promulgation: formData.isPromulgation || false,
-      block_no: formData.blockNo,
-      re_survey_no: formData.reSurveyNo || null,
-      integrated_712: formData.integrated712 || null,
-      integrated_712_filename: formData.integrated712FileName || null,
-      updated_at: new Date().toISOString() // Add timestamp
+    if (!formData.district || !formData.taluka || !formData.village || !formData.blockNo) {
+      toast({ title: "Please fill all required fields", variant: "destructive" })
+      return
+    }
+    if (formData.isPromulgation && !formData.reSurveyNo) {
+      toast({ title: "Re Survey No is required for Promulgation", variant: "destructive" })
+      return
     }
 
-    // Use UPDATE instead of INSERT - pass the ID
-    const { data: result, error } = await LandRecordService.updateLandRecord(formData.id!, updateData)
-    
-    if (error) throw error
+    setLoading(true)
+    try {
+      // Always save square meters value, regardless of unit chosen
+      let areaValueInSqm = 0;
+      
+      if (formData.area.unit === 'acre_guntha') {
+        areaValueInSqm = formData.area.sq_m || 0;
+      } else if (formData.area.unit === 'sq_m') {
+        areaValueInSqm = formData.area.value || 0;
+      }
 
-    // Update the original data to match current form data
-    const updatedData = { ...formData }
-    setOriginalData(updatedData)
+      // Map form data to database schema for UPDATE
+      const updateData = {
+        district: formData.district,
+        taluka: formData.taluka,
+        village: formData.village,
+        area_value: areaValueInSqm,
+        area_unit: 'sq_m',
+        s_no_type: formData.sNoType || 's_no',
+        s_no: formData.sNo || formData.blockNo,
+        is_promulgation: formData.isPromulgation || false,
+        block_no: formData.blockNo,
+        re_survey_no: formData.reSurveyNo || null,
+        integrated_712: formData.integrated712 || null,
+        integrated_712_filename: formData.integrated712FileName || null,
+        status: 'drafting',
+        updated_at: new Date().toISOString()
+      }
 
-    toast({ title: "Land basic info updated successfully" })
-    
-  } catch (error) {
-    console.error('Error updating land record:', error)
-    toast({ title: "Error updating data", variant: "destructive" })
-  } finally {
-    setLoading(false)
+      const { data: result, error } = await LandRecordService.updateLandRecord(formData.id!, updateData)
+      
+      if (error) throw error
+
+      // Update the original data to match current form data
+      const updatedData = { ...formData }
+      setOriginalData(updatedData)
+
+      // Create activity log for the edit
+      await createActivityLog({
+        user_email: user?.primaryEmailAddress?.emailAddress || "",
+        land_record_id: formData.id!,
+        step: 1,
+        chat_id: null,
+        description: `Edited land basic information for ${formData.village}, ${formData.taluka}, ${formData.district}`
+      });
+      refreshStatus();
+      toast({ title: "Land basic info updated successfully" })
+      
+      // Show comment modal only for managers and admins
+      if (role === 'manager' || role === 'admin') {
+        setShowCommentModal(true);
+      }
+      // For other roles, just show success toast - no modal
+      
+    } catch (error) {
+      console.error('Error updating land record:', error)
+      toast({ title: "Error updating data", variant: "destructive" })
+    } finally {
+      setLoading(false)
+    }
   }
-}
 
   if (loading && !isDataLoaded) {
     return (
@@ -728,160 +1028,204 @@ const handleSave = async () => {
   }
 
   return (
-    <Card>
-      <CardHeader>
-        <div className="flex justify-between items-center">
-          <CardTitle>Step 1: Land Basic Information</CardTitle>
-          {hasChanges && (
-            <Button onClick={handleSave} disabled={loading} size="sm" className="flex items-center gap-2">
-              <Save className="w-4 h-4" />
-              {loading ? "Saving..." : "Save Changes"}
-            </Button>
-          )}
-        </div>
-      </CardHeader>
-      <CardContent className="space-y-6">
-        {/* Location Selection */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div className="space-y-2">
-            <Label>District *</Label>
-            <Select value={formData.district} onValueChange={handleDistrictChange}>
-              <SelectTrigger>
-                <SelectValue placeholder="Select District" />
-              </SelectTrigger>
-              <SelectContent>
-                {getDistricts().map((dist) => (
-                  <SelectItem key={dist} value={dist}>{dist}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="space-y-2">
-            <Label>Taluka *</Label>
-            <Select value={formData.taluka} onValueChange={handleTalukaChange} disabled={!formData.district}>
-              <SelectTrigger>
-                <SelectValue placeholder="Select Taluka" />
-              </SelectTrigger>
-              <SelectContent>
-                {getTalukas(formData.district).map((tal) => (
-                  <SelectItem key={tal} value={tal}>{tal}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="space-y-2">
-            <Label>Village *</Label>
-            <Select value={formData.village} onValueChange={handleVillageChange} disabled={!formData.taluka}>
-              <SelectTrigger>
-                <SelectValue placeholder="Select Village" />
-              </SelectTrigger>
-              <SelectContent>
-                {getVillages(formData.district, formData.taluka).map((vill) => (
-                  <SelectItem key={vill} value={vill}>{vill}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        </div>
-
-{/* Area Fields */}
-<div className="space-y-2">
-  <Label>Land Area *</Label>
-  <AreaFields
-    area={formData.area}
-    onChange={(newArea) => updateFormField({ area: newArea })}
-    disabled={loading}
-  />
-</div>
-
-        {/* Promulgation Display */}
-        {formData.village && formData.isPromulgation !== null && (
-          <div>
-            <Label>Promulgation Status:</Label>{" "}
-            <span className={formData.isPromulgation ? "text-green-600" : "text-red-600"}>
-              {formData.isPromulgation ? "Yes" : "No"}
-            </span>
-          </div>
-        )}
-
-        {/* Block No - Always show */}
-        <div className="space-y-2">
-          <Label htmlFor="block-no">Block No *</Label>
-          <Input
-            id="block-no"
-            value={formData.blockNo}
-            onChange={(e) => updateFormField({ blockNo: e.target.value })}
-            placeholder="Enter Block No"
-          />
-        </div>
-
-        {/* Re Survey No - Only show if promulgation is Yes */}
-        {formData.isPromulgation && (
-          <div className="p-4 border rounded-lg bg-blue-50">
-            <div className="space-y-2">
-              <Label htmlFor="re-survey-no">Re Survey No *</Label>
-              <Input
-                id="re-survey-no"
-                value={formData.reSurveyNo}
-                onChange={(e) => updateFormField({ reSurveyNo: e.target.value })}
-                placeholder="Enter Re Survey No"
-              />
-            </div>
-          </div>
-        )}
-
-        {/* Document Upload */}
-        <div className="space-y-2">
-          <Label htmlFor="integrated-712">Integrated 7/12 Document</Label>
-          <div className="flex items-center gap-4">
-            <div className="relative">
-              <input
-                id="integrated-712"
-                type="file"
-                accept=".pdf,.jpg,.jpeg,.png"
-                onChange={(e) => {
-                  const file = e.target.files?.[0]
-                  if (file) {
-                    handleFileUpload(file)
-                    e.target.value = ''
-                  }
-                }}
-                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                disabled={loading}
-              />
-              <Button 
-                type="button" 
-                variant="outline" 
-                disabled={loading}
-                className="flex items-center gap-2 bg-blue-600 text-white border-blue-600 hover:bg-blue-700 disabled:opacity-50"
-              >
-                <Upload className="w-4 h-4" />
-                {loading ? "Uploading..." : "Choose File"}
+    <>
+      <Card>
+        <CardHeader>
+          <div className="flex justify-between items-center">
+            <CardTitle>Step 1: Land Basic Information</CardTitle>
+            {hasChanges && (
+              <Button onClick={handleSave} disabled={loading} size="sm" className="flex items-center gap-2">
+                <Save className="w-4 h-4" />
+                {loading ? "Saving..." : "Save Changes"}
               </Button>
-            </div>
-            {uploadedFileName && (
-              <div className="flex items-center gap-2 px-3 py-2 bg-green-50 border border-green-200 rounded-md">
-                <span className="text-sm text-green-800 max-w-[200px] truncate" title={uploadedFileName}>
-                  {uploadedFileName}
-                </span>
-                <button
-                  type="button"
-                  onClick={handleRemoveFile}
-                  className="text-green-600 hover:text-green-800 text-lg leading-none"
-                  title="Remove file"
-                >
-                  ×
-                </button>
-              </div>
             )}
           </div>
-          <p className="text-xs text-gray-500">
-            Supported formats: PDF, JPG, JPEG, PNG 
-          </p>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          {/* Location Selection */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="space-y-2">
+              <Label>District *</Label>
+              <Select value={formData.district} onValueChange={handleDistrictChange}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select District" />
+                </SelectTrigger>
+                <SelectContent>
+                  {getDistricts().map((dist) => (
+                    <SelectItem key={dist} value={dist}>{dist}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Taluka *</Label>
+              <Select value={formData.taluka} onValueChange={handleTalukaChange} disabled={!formData.district}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select Taluka" />
+                </SelectTrigger>
+                <SelectContent>
+                  {getTalukas(formData.district).map((tal) => (
+                    <SelectItem key={tal} value={tal}>{tal}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Village *</Label>
+              <Select value={formData.village} onValueChange={handleVillageChange} disabled={!formData.taluka}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select Village" />
+                </SelectTrigger>
+                <SelectContent>
+                  {getVillages(formData.district, formData.taluka).map((vill) => (
+                    <SelectItem key={vill} value={vill}>{vill}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          {/* Area Fields */}
+          <div className="space-y-2">
+            <Label>Land Area *</Label>
+            <AreaFields
+              area={formData.area}
+              onChange={(newArea) => updateFormField({ area: newArea })}
+              disabled={loading}
+            />
+          </div>
+
+          {/* Promulgation Display */}
+          {formData.village && formData.isPromulgation !== null && (
+            <div>
+              <Label>Promulgation Status:</Label>{" "}
+              <span className={formData.isPromulgation ? "text-green-600" : "text-red-600"}>
+                {formData.isPromulgation ? "Yes" : "No"}
+              </span>
+            </div>
+          )}
+
+          {/* Block No */}
+          <div className="space-y-2">
+            <Label htmlFor="block-no">Block No *</Label>
+            <Input
+              id="block-no"
+              value={formData.blockNo}
+              onChange={(e) => updateFormField({ blockNo: e.target.value })}
+              placeholder="Enter Block No"
+            />
+          </div>
+
+          {/* Re Survey No */}
+          {formData.isPromulgation && (
+            <div className="p-4 border rounded-lg bg-blue-50">
+              <div className="space-y-2">
+                <Label htmlFor="re-survey-no">Re Survey No *</Label>
+                <Input
+                  id="re-survey-no"
+                  value={formData.reSurveyNo}
+                  onChange={(e) => updateFormField({ reSurveyNo: e.target.value })}
+                  placeholder="Enter Re Survey No"
+                />
+              </div>
+            </div>
+          )}
+
+          {/* Document Upload */}
+          <div className="space-y-2">
+            <Label htmlFor="integrated-712">Integrated 7/12 Document</Label>
+            <div className="flex items-center gap-4">
+              <div className="relative">
+                <input
+                  id="integrated-712"
+                  type="file"
+                  accept=".pdf,.jpg,.jpeg,.png"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0]
+                    if (file) {
+                      handleFileUpload(file)
+                      e.target.value = ''
+                    }
+                  }}
+                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                  disabled={loading}
+                />
+                <Button 
+                  type="button" 
+                  variant="outline" 
+                  disabled={loading}
+                  className="flex items-center gap-2 bg-blue-600 text-white border-blue-600 hover:bg-blue-700 disabled:opacity-50"
+                >
+                  <Upload className="w-4 h-4" />
+                  {loading ? "Uploading..." : "Choose File"}
+                </Button>
+              </div>
+              {uploadedFileName && (
+                <div className="flex items-center gap-2 px-3 py-2 bg-green-50 border border-green-200 rounded-md">
+                  <span className="text-sm text-green-800 max-w-[200px] truncate" title={uploadedFileName}>
+                    {uploadedFileName}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={handleRemoveFile}
+                    className="text-green-600 hover:text-green-800 text-lg leading-none"
+                    title="Remove file"
+                  >
+                    ×
+                  </button>
+                </div>
+              )}
+            </div>
+            <p className="text-xs text-gray-500">
+              Supported formats: PDF, JPG, JPEG, PNG 
+            </p>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Comment Modal */}
+      {showCommentModal && (
+        <CommentModal
+          isOpen={showCommentModal}
+          onClose={handleSkipComment}
+          onSubmit={handleSendComment}
+          loading={sendingComment}
+          step={1}
+        />
+      )}
+
+      {/* Navigation Modal after saving - Only for manager/admin */}
+      {showNavigationModal && (role === 'manager' || role === 'admin') && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <Card className="w-full max-w-md">
+            <CardHeader>
+              <CardTitle>Next Steps</CardTitle>
+              <p className="text-sm text-muted-foreground">
+                Message sent successfully! What would you like to do next?
+              </p>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex flex-col gap-3">
+                <Button
+                  onClick={handleContinueToStep2}
+                  className="w-full"
+                >
+                  Continue to Step 2
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={handleBackToLandMaster}
+                  className="w-full"
+                >
+                  Back to Land Master
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
         </div>
-      </CardContent>
-    </Card>
+      )}
+    </>
   )
 }

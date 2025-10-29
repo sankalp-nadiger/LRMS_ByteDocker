@@ -32,11 +32,12 @@ import {
   SlabEntry,
 } from "@/contexts/land-record-context";
 import { useToast } from "@/hooks/use-toast";
-import { convertToSquareMeters, convertFromSquareMeters } from "@/lib/supabase";
+import { convertToSquareMeters, convertFromSquareMeters, createActivityLog } from "@/lib/supabase";
 import { Loader2 } from "lucide-react";
 import { uploadFile } from "@/lib/supabase";
 import { LandRecordService } from "@/lib/supabase";
 import { useStepFormData } from "@/hooks/use-step-form-data";
+import { useUser } from "@clerk/nextjs";
 
 // ---------- UI-only Types ----------
 type SNoTypeUI = "survey_no" | "block_no" | "re_survey_no";
@@ -227,6 +228,7 @@ export default function YearSlabs() {
     currentStep 
   } = useLandRecord();
   const { toast } = useToast();
+  const { user } = useUser();
   
   // Add this hook
   const { 
@@ -1135,6 +1137,14 @@ const handleSaveAndNext = async () => {
       console.error('Save error details:', error);
       throw error;
     }
+
+    await createActivityLog({
+      user_email: user?.primaryEmailAddress?.emailAddress || "",
+      land_record_id: landBasicInfo.id,
+      step: currentStep,
+      chat_id: null,
+      description: `Added year slabs: ${dbSlabs.length} slabs configured`
+    });
 
     // Update context
     const { data: fetchedSlabs } = await LandRecordService.getYearSlabs(landBasicInfo.id);

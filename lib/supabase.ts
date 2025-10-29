@@ -43,6 +43,36 @@ export interface YearSlabData {
   ekatrikaran_entries?: SlabEntryData[];  // Changed to snake_case
 }
 
+export interface Chat {
+  id: string;
+  created_at: string; // ISO timestamp (UTC)
+  from_email: string;
+  to_email: string[]; // array of recipients
+  message: string;
+  land_record_id: string;
+  step?: number | null;
+}
+
+export interface ActivityLog {
+  id: string;
+  created_at: string; // ISO timestamp (UTC)
+  user_email: string;
+  land_record_id: string;
+  step?: number | null;
+  chat_id?: string | null;
+  description: string;
+}
+
+export interface Project {
+  id: string;
+  created_at: string;
+  updated_at: string;
+  name: string;
+  description?: string;
+  created_by_email: string;
+  land_record_ids: string[];
+}
+
 export interface SlabEntryData {
   id?: string;
   year_slab_id?: string; // Made optional since it might not exist before saving
@@ -165,7 +195,7 @@ export class LandRecordService {
         .update({
           ...updateData,
           updated_at: new Date().toISOString(),
-          status: data.status || 'draft',           // Default to draft
+          status: data.status || 'drafting', 
           current_step: data.current_step || 1     // Default to step 1 if missing
         })
         .eq('id', data.id)
@@ -182,7 +212,7 @@ export class LandRecordService {
         .from('land_records')
         .insert([{
           ...insertData,
-          status: 'draft',
+          status: 'initiated',
           current_step: 1
         }])
         .select()
@@ -1309,4 +1339,272 @@ static async get712Documents(landRecordId: string) {
       .select()
       .single();
   }
+}
+
+export async function createChat({ from_email, to_email, message, land_record_id, step }) {
+  const { data, error } = await supabase
+    .from("chats")
+    .insert([{ from_email, to_email, message, land_record_id, step }])
+    .select("*")
+    .single();
+
+  if (error) {
+    console.error("Error creating chat:", error);
+    throw error;
+  }
+  return data;
+}
+
+export async function getChatsByLandRecord(land_record_id) {
+  const { data, error } = await supabase
+    .from("chats")
+    .select("*")
+    .eq("land_record_id", land_record_id)
+    .order("created_at", { ascending: true });
+
+    console.log("Fetched chats:", data);
+  if (error) {
+    console.error("Error fetching chats:", error);
+    throw error;
+  }
+  return data;
+}
+
+export async function createActivityLog({ user_email, land_record_id, step, chat_id, description }) {
+  const { data, error } = await supabase
+    .from("activity_logs")
+    .insert([{ user_email, land_record_id, step, chat_id, description }])
+    .select("*")
+    .single();
+
+  if (error) {
+    console.error("Error creating activity log:", error);
+    throw error;
+  }
+  return data;
+}
+
+export async function getActivityLogsByLandRecord(land_record_id: string) {
+  const { data, error } = await supabase
+    .from("activity_logs")
+    .select("*")
+    .eq("land_record_id", land_record_id)
+    .order("created_at", { ascending: false });
+
+    console.log("Fetched activity logs:", data);
+  if (error) {
+    console.error("Error fetching activity logs:", error);
+    throw error;
+  }
+
+  // Handle missing or null data safely
+  return (data || []).map(log => ({
+    id: log.id || '',
+    created_at: log.created_at || new Date().toISOString(),
+    user_email: log.user_email || 'unknown',
+    land_record_id: log.land_record_id || land_record_id,
+    step: log.step !== null && log.step !== undefined ? log.step : null,
+    chat_id: log.chat_id || null,
+    description: log.description || 'No description'
+  }));
+}
+
+export async function markChatAsRead(chatId: string, userEmail: string) {
+  // Fetch current read_by array
+  const { data: chat, error: fetchError } = await supabase
+    .from("chats")
+    .select("read_by")
+    .eq("id", chatId)
+    .single();
+
+  if (fetchError) {
+    console.error("Error fetching chat:", fetchError);
+    throw fetchError;
+  }
+
+  // Avoid duplicate entries
+  const updatedReadBy = chat?.read_by?.includes(userEmail)
+    ? chat.read_by
+    : [...(chat?.read_by || []), userEmail];
+
+  // Update the chat record
+  const { data, error: updateError } = await supabase
+    .from("chats")
+    .update({ read_by: updatedReadBy })
+    .eq("id", chatId)
+    .select("*")
+    .single();
+
+  if (updateError) {
+    console.error("Error updating read_by:", updateError);
+    throw updateError;
+  }
+
+  return data;
+}
+
+/**
+ * Fetches all chat messages.
+ * Optionally filters by land_record_id, step, or user_email (sender or recipient).
+ */
+export async function getAllChats({
+  land_record_id,
+  step,
+  user_email,
+}: {
+  land_record_id?: string;
+  step?: number;
+  user_email?: string;
+}) {
+  let query = supabase.from("chats").select("*");
+
+  // Optional filters
+  if (land_record_id) query = query.eq("land_record_id", land_record_id);
+  if (step) query = query.eq("step", step);
+
+  // Filter by participant (either sender or recipient)
+  if (user_email) {
+    query = query.or(
+      `from_email.eq.${user_email},to_email.cs.{${user_email}}`
+    );
+  }
+
+  // Order by creation time (newest last)
+  query = query.order("created_at", { ascending: true });
+
+  const { data, error } = await query;
+
+  if (error) {
+    console.error("Error fetching chats:", error);
+    throw error;
+  }
+
+  return data;
+}
+
+export const getAllProjects = async (supabase) => {
+  const { data, error } = await supabase
+    .from('projects')
+    .select('*')
+    .order('created_at', { ascending: false });
+
+  if (error) throw error;
+  return data;
+};
+
+export const getProjectById = async (supabase, id) => {
+  const { data, error } = await supabase
+    .from('projects')
+    .select('*')
+    .eq('id', id)
+    .single();
+
+  if (error) throw error;
+  return data;
+};
+
+export const updateProject = async (supabase, id, updates) => {
+  const { data, error } = await supabase
+    .from('projects')
+    .update({
+      ...updates,
+      updated_at: new Date().toISOString()
+    })
+    .eq('id', id)
+    .select()
+    .single();
+
+  if (error) throw error;
+  return data;
+};
+
+export const addLandRecordToProject = async (supabase, projectId, landRecordId) => {
+  const { data: project, error: fetchError } = await supabase
+    .from('projects')
+    .select('land_record_ids')
+    .eq('id', projectId)
+    .single();
+
+  if (fetchError) throw fetchError;
+
+  const updatedIds = [...new Set([...(project.land_record_ids || []), landRecordId])];
+
+  const { data, error } = await supabase
+    .from('projects')
+    .update({
+      land_record_ids: updatedIds,
+      updated_at: new Date().toISOString()
+    })
+    .eq('id', projectId)
+    .select()
+    .single();
+
+  if (error) throw error;
+  return data;
+};
+
+export const createProject = async (supabase, projectData) => {
+  const { data, error } = await supabase
+    .from('projects')
+    .insert([{
+      name: projectData.name,
+      description: projectData.description || null,
+      created_by_email: projectData.created_by_email,
+      land_record_ids: projectData.land_record_ids || []
+    }])
+    .select()
+    .single();
+
+  if (error) throw error;
+  return data;
+};
+
+// Owner Discussions
+
+export const getOwnerDiscussionsByLandRecord = async (landRecordId: string): Promise<OwnerDiscussion[]> => {
+  const { data, error } = await supabase
+    .from('owner_discussions')
+    .select('*')
+    .eq('land_record_id', landRecordId)
+    .order('created_at', { ascending: true });
+
+  if (error) throw error;
+  return data || [];
+};
+
+export const createOwnerDiscussion = async (discussion: Omit<OwnerDiscussion, 'id' | 'created_at'>): Promise<OwnerDiscussion> => {
+  const { data, error } = await supabase
+    .from('owner_discussions')
+    .insert([discussion])
+    .select()
+    .single();
+
+  if (error) throw error;
+  return data;
+};
+
+// Land Record Status Update
+export const updateLandRecordStatus = async (landRecordId: string, status: string): Promise<void> => {
+  const { error } = await supabase
+    .from('land_records')
+    .update({ status })
+    .eq('id', landRecordId);
+
+  if (error) throw error;
+};
+
+// Add this to your lib/supabase.ts file
+export async function getLandRecordById(id: string) {
+  const { data, error } = await supabase
+    .from('land_records')
+    .select('*')
+    .eq('id', id)
+    .single();
+
+  if (error) {
+    console.error('Error fetching land record:', error);
+    throw error;
+  }
+
+  return data;
 }

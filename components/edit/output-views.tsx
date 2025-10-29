@@ -8,11 +8,15 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
-import { Download, Eye, Filter, Calendar, AlertTriangle } from "lucide-react"
+import { Download, Eye, Filter, Calendar, AlertTriangle, Send, X, Loader2 } from "lucide-react"
 import { useLandRecord } from "@/contexts/land-record-context"
 import { convertToSquareMeters, LandRecordService } from "@/lib/supabase"
 import { useToast } from "@/hooks/use-toast"
 import { useRouter } from "next/navigation"
+import { useUser } from "@clerk/nextjs"
+import { createActivityLog, createChat } from "@/lib/supabase"
+import { useUserRole } from '@/contexts/user-context'
+import { useRef } from "react"
 
 interface PassbookEntry {
   year: number
@@ -49,11 +53,257 @@ interface Nondh {
   affected_s_nos: any[]
   nondh_doc_url?: string
 }
+interface User {
+  id: string;
+  email: string;
+  fullName: string;
+  role: string;
+}
+
+// Comment Modal Component
+interface CommentModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  onSubmit: (message: string, recipients: string[], isPushForReview?: boolean) => Promise<void>;
+  loading?: boolean;
+  step: number;
+  userRole: string;
+  landRecordStatus?: string;
+}
+
+const CommentModal = ({ isOpen, onClose, onSubmit, loading = false, step, userRole, landRecordStatus }: CommentModalProps) => {
+  const [message, setMessage] = useState('');
+  const [showMentionDropdown, setShowMentionDropdown] = useState(false);
+  const [mentionSearch, setMentionSearch] = useState('');
+  const [selectedRecipients, setSelectedRecipients] = useState<string[]>([]);
+  const [cursorPosition, setCursorPosition] = useState(0);
+  const [users, setUsers] = useState<User[]>([]);
+  const [isPushForReview, setIsPushForReview] = useState(false);
+  const { user } = useUser();
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const modalTitle = userRole === 'executioner'
+    ? `Send Message to Manager/Reviewer - Step ${step}`
+    : `Send Message to Executioner/Reviewer - Step ${step}`;
+
+  useEffect(() => {
+    if (isOpen) {
+      const fetchUsers = async () => {
+        try {
+          const response = await fetch('/api/users/list');
+          if (!response.ok) throw new Error('Failed to fetch users');
+          const data = await response.json();
+          setUsers(data.users);
+        } catch (error) {
+          console.error('Error fetching users:', error);
+        }
+      };
+      fetchUsers();
+      setMessage('');
+      setSelectedRecipients([]);
+      setShowMentionDropdown(false);
+      setIsPushForReview(landRecordStatus === 'review');
+    }
+  }, [isOpen, landRecordStatus]);
+
+  const handleMessageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    const position = e.target.selectionStart || 0;
+    
+    setMessage(value);
+    setCursorPosition(position);
+
+    const textBeforeCursor = value.substring(0, position);
+    const lastAtIndex = textBeforeCursor.lastIndexOf('@');
+    
+    if (lastAtIndex !== -1) {
+      const afterAt = textBeforeCursor.substring(lastAtIndex + 1);
+      const beforeAt = textBeforeCursor.substring(0, lastAtIndex);
+      if (beforeAt === '' || beforeAt.endsWith(' ')) {
+        setMentionSearch(afterAt);
+        setShowMentionDropdown(true);
+        return;
+      }
+    }
+    
+    setShowMentionDropdown(false);
+  };
+
+  const handleMentionSelect = (userEmail: string, userName: string) => {
+    const textBeforeCursor = message.substring(0, cursorPosition);
+    const textAfterCursor = message.substring(cursorPosition);
+    const lastAtIndex = textBeforeCursor.lastIndexOf('@');
+    
+    const beforeMention = message.substring(0, lastAtIndex);
+    const newText = beforeMention + `@${userName} ` + textAfterCursor;
+    
+    setMessage(newText);
+    setSelectedRecipients([...selectedRecipients, userEmail]);
+    setShowMentionDropdown(false);
+    setMentionSearch('');
+    
+    setTimeout(() => {
+      inputRef.current?.focus();
+    }, 0);
+  };
+
+  const removeMention = (email: string) => {
+    setSelectedRecipients(selectedRecipients.filter(e => e !== email));
+  };
+
+  const getUserByEmail = (email: string) => {
+    return users.find(u => u.email === email);
+  };
+
+  const filteredUsers = users
+    .filter(u => u.email !== user?.primaryEmailAddress?.emailAddress)
+    .filter(u => !selectedRecipients.includes(u.email))
+    .filter(u => 
+      mentionSearch === '' || 
+      u.fullName.toLowerCase().includes(mentionSearch.toLowerCase()) ||
+      u.email.toLowerCase().includes(mentionSearch.toLowerCase())
+    );
+
+  const handleSubmit = async () => {
+    if (!message.trim()) return;
+    await onSubmit(message, selectedRecipients, isPushForReview);
+    setMessage('');
+    setSelectedRecipients([]);
+    setIsPushForReview(false);
+  };
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+      <Card className="w-full max-w-lg max-h-[80vh] overflow-hidden flex flex-col">
+        <CardHeader className="flex-shrink-0 border-b bg-white sticky top-0 z-10">
+          <div className="flex justify-between items-center">
+            <CardTitle>{modalTitle}</CardTitle>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={onClose}
+              disabled={loading}
+            >
+              <X className="w-4 h-4" />
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-4 overflow-y-auto flex-1 p-6 pt-4">
+          {selectedRecipients.length > 0 && (
+            <div className="flex flex-wrap gap-2 mb-2">
+              {selectedRecipients.map(email => {
+                const recipient = getUserByEmail(email);
+                return (
+                  <span key={email} className="inline-flex items-center gap-1 px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-sm">
+                    {recipient?.fullName || email}
+                    <button
+                      onClick={() => removeMention(email)}
+                      className="hover:text-blue-900 text-xs"
+                    >
+                      ×
+                    </button>
+                  </span>
+                );
+              })}
+            </div>
+          )}
+
+          <div className="space-y-2">
+            <Label htmlFor="comment-message">Message</Label>
+            <div className="relative">
+              <input
+                ref={inputRef}
+                id="comment-message"
+                type="text"
+                value={message}
+                onChange={handleMessageChange}
+                placeholder={userRole === 'executioner'
+                  ? "Type @ to mention someone or send to all managers/reviewers..."
+                  : "Type @ to mention someone or send to all executioners/reviewers..."}
+                disabled={loading}
+                onKeyPress={(e) => e.key === 'Enter' && !showMentionDropdown && handleSubmit()}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              />
+
+              {showMentionDropdown && filteredUsers.length > 0 && (
+                <div className="absolute top-full left-0 mt-1 w-full bg-white border border-gray-300 rounded-lg shadow-lg max-h-48 overflow-y-auto z-20">
+                  {filteredUsers.map(u => (
+                    <button
+                      key={u.id}
+                      onClick={() => handleMentionSelect(u.email, u.fullName)}
+                      className="w-full text-left px-4 py-2 hover:bg-gray-100 flex items-center justify-between border-b border-gray-100 last:border-b-0"
+                    >
+                      <div className="flex flex-col items-start">
+                        <span className="font-medium text-sm">{u.fullName}</span>
+                        <span className="text-xs text-gray-500">{u.email}</span>
+                      </div>
+                      <span className="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded">
+                        {u.role.charAt(0).toUpperCase() + u.role.slice(1)}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            <p className="text-xs text-gray-500">
+              Type @ to mention specific users, or send to all {userRole === 'executioner' ? 'managers/reviewers' : 'executioners/reviewers'}
+            </p>
+          </div>
+
+          {(userRole === 'manager' || userRole === 'admin' || userRole === 'executioner') && (
+            <div className="flex items-center gap-2 p-3 bg-green-50 border border-green-200 rounded-lg">
+              <input
+                type="checkbox"
+                id="push-review"
+                checked={isPushForReview}
+                disabled={landRecordStatus === 'review'}
+                onChange={(e) => setIsPushForReview(e.target.checked)}
+                className="w-4 h-4 text-green-600 rounded focus:ring-green-500"
+              />
+              <Label htmlFor="push-review" className="text-sm font-medium cursor-pointer">
+                Push for Review {landRecordStatus === 'review' && '(Already in Review)'}
+              </Label>
+            </div>
+          )}
+          
+          <div className="flex gap-2 pt-4">
+            <Button
+              variant="outline"
+              onClick={onClose}
+              disabled={loading}
+              className="flex-1"
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleSubmit}
+              disabled={loading || !message.trim()}
+              className="flex-1 flex items-center gap-2"
+            >
+              {loading ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <Send className="w-4 h-4" />
+              )}
+              Send Message
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+};
 
 export default function OutputViews() {
-  const { landBasicInfo, recordId } = useLandRecord()
+  const { landBasicInfo, recordId, yearSlabs } = useLandRecord()
   const { toast } = useToast()
   const router = useRouter()
+  const { user } = useUser()
+  const { role } = useUserRole()
+const [showCommentModal, setShowCommentModal] = useState(false)
+const [sendingComment, setSendingComment] = useState(false)
   const [passbookData, setPassbookData] = useState<PassbookEntry[]>([])
   const [nondhDetails, setNondhDetails] = useState<NondhDetail[]>([])
   const [nondhs, setNondhs] = useState<Nondh[]>([])
@@ -63,116 +313,11 @@ export default function OutputViews() {
   const [sNoFilter, setSNoFilter] = useState("")
   const [loading, setLoading] = useState(true)
 const [isGeneratingPDF, setIsGeneratingPDF] = useState(false)
+const [landRecordStatus, setLandRecordStatus] = useState<string>('');
 
-const handleDownloadIntegratedDocument = async () => {
-
-  if (!landBasicInfo) {
-    toast({
-      title: 'Error',
-      description: 'Land basic information is required to generate the document',
-      variant: 'destructive'
-    });
-    return;
-  }
-
-  setIsGeneratingPDF(true);
-  
-  try {
-    // Import the PDF generator dynamically to avoid SSR issues
-    const { IntegratedDocumentGenerator } = await import('@/lib/pdf-generator');
-    
-    
-    await IntegratedDocumentGenerator.generateIntegratedPDF(recordId as string, landBasicInfo);
-    
-    toast({
-      title: 'Success',
-      description: 'Integrated document generated and downloaded successfully',
-    });
-  } catch (error) {
-    console.error('Error generating PDF:', error);
-    toast({
-      title: 'Error',
-      description: 'Failed to generate integrated document. Please try again.',
-      variant: 'destructive'
-    });
-  } finally {
-    setIsGeneratingPDF(false);
-  }
-}
-
-  const safeNondhNumber = (nondh: any): string => {
-  if (!nondh || (!nondh.number && nondh.number !== 0)) return "0";
-  return nondh.number.toString();
-};
-
-const formatDate = (dateString: string): string => {
-  if (!dateString) return '-';
-  const date = new Date(dateString);
-  return date.toLocaleDateString('en-IN'); // or your preferred format
-};
-
-  // Helper function to get unique S.Nos with types
-  const getUniqueSNosWithTypes = () => {
-    const sNoSet = new Set<string>();
-    const sNoTypeMap = new Map<string, string>();
-    
-    // From nondhs (affected S.Nos)
-    nondhs.forEach(nondh => {
-      if (nondh.affected_s_nos && Array.isArray(nondh.affected_s_nos)) {
-        nondh.affected_s_nos.forEach(sNoData => {
-          try {
-            let sNoObj;
-            if (typeof sNoData === 'string' && sNoData.startsWith('{')) {
-              sNoObj = JSON.parse(sNoData);
-            } else if (typeof sNoData === 'object') {
-              sNoObj = sNoData;
-            } else {
-              sNoObj = { number: sNoData.toString(), type: 's_no' };
-            }
-            
-            const sNoKey = `${sNoObj.number}`;
-            sNoSet.add(sNoKey);
-            sNoTypeMap.set(sNoKey, sNoObj.type || 's_no');
-          } catch (e) {
-            const sNoKey = sNoData.toString();
-            sNoSet.add(sNoKey);
-            sNoTypeMap.set(sNoKey, 's_no');
-          }
-        });
-      }
-    });
-    
-    // From nondhDetails (individual S.Nos)
-    nondhDetails.forEach(detail => {
-      if (detail.sNo) {
-        sNoSet.add(detail.sNo);
-        if (!sNoTypeMap.has(detail.sNo)) {
-          sNoTypeMap.set(detail.sNo, 's_no');
-        }
-      }
-    });
-    
-    // From passbook data
-    passbookData.forEach(entry => {
-      if (entry.sNo) {
-        sNoSet.add(entry.sNo);
-        if (!sNoTypeMap.has(entry.sNo)) {
-          sNoTypeMap.set(entry.sNo, 's_no');
-        }
-      }
-    });
-    
-    return Array.from(sNoSet).map(sNo => ({
-      value: sNo,
-      type: sNoTypeMap.get(sNo) || 's_no',
-      label: `${sNo} (${sNoTypeMap.get(sNo) === 'block_no' ? 'Block' : 
-                       sNoTypeMap.get(sNo) === 're_survey_no' ? 'Re-survey' : 'Survey'})`
-    })).sort((a, b) => a.value.localeCompare(b.value, undefined, { numeric: true }));
-  };
-
-  // Helper function to format affected S.Nos properly
-  const formatAffectedSNos = (affectedSNos: any): string => {
-     console.log('formatAffectedSNos received:', affectedSNos, 'type:', typeof affectedSNos);
+ // Helper function to format affected S.Nos properly
+const formatAffectedSNos = (affectedSNos: any, availableSNos?: Array<{value: string, type: string, label: string}>): string => {
+  console.log('formatAffectedSNos received:', affectedSNos, 'type:', typeof affectedSNos);
   if (!affectedSNos) return '-';
   
   try {
@@ -207,6 +352,15 @@ const formatDate = (dateString: string): string => {
       sNos = [affectedSNos];
     }
     
+    // Filter out S.Nos that are not in available S.Nos (basic info/year slabs)
+    if (availableSNos && availableSNos.length > 0) {
+      const availableSNosSet = new Set(availableSNos.map(s => s.value));
+      sNos = sNos.filter(sNo => {
+        const number = typeof sNo === 'object' ? sNo.number : sNo;
+        return availableSNosSet.has(number?.toString());
+      });
+    }
+    
     // Format the S.Nos with type labels
     if (sNos && sNos.length > 0) {
       return sNos.map(sNo => {
@@ -224,6 +378,138 @@ const formatDate = (dateString: string): string => {
     console.warn('Error formatting affected S.Nos:', error);
     return typeof affectedSNos === 'string' ? affectedSNos : JSON.stringify(affectedSNos);
   }
+};
+// Fetch land record status
+useEffect(() => {
+  const fetchLandRecordStatus = async () => {
+    if (!recordId) return;
+    
+    try {
+      const { data, error } = await LandRecordService.getLandRecord(recordId);
+      if (error) throw error;
+      if (data) {
+        setLandRecordStatus(data.status || '');
+      }
+    } catch (error) {
+      console.error('Error fetching land record status:', error);
+    }
+  };
+
+  if (recordId) {
+    fetchLandRecordStatus();
+  }
+}, [recordId]);
+
+const handleDownloadIntegratedDocument = async () => {
+
+  if (!landBasicInfo) {
+    toast({
+      title: 'Error',
+      description: 'Land basic information is required to generate the document',
+      variant: 'destructive'
+    });
+    return;
+  }
+
+  setIsGeneratingPDF(true);
+  
+  try {
+    // Import the PDF generator dynamically to avoid SSR issues
+    const { IntegratedDocumentGenerator } = await import('@/lib/pdf-generator');
+    
+    
+    await IntegratedDocumentGenerator.generateIntegratedPDF(recordId as string, landBasicInfo);
+    
+    toast({
+      title: 'Success',
+      description: 'Integrated document generated and downloaded successfully',
+    });
+  } catch (error) {
+  console.error('Error generating PDF:', error);
+  toast({
+    title: 'Error',
+    description: error instanceof Error ? error.message : 'Failed to generate integrated document. Please try again.',
+    variant: 'destructive'
+  });
+} finally {
+    setIsGeneratingPDF(false);
+  }
+}
+
+  const safeNondhNumber = (nondh: any): string => {
+  if (!nondh || (!nondh.number && nondh.number !== 0)) return "0";
+  return nondh.number.toString();
+};
+
+const formatDate = (dateString: string): string => {
+  if (!dateString) return '-';
+  const date = new Date(dateString);
+  return date.toLocaleDateString('en-IN'); // or your preferred format
+};
+
+// Helper function to get unique S.Nos with types from ONLY basic info and year slabs
+const getUniqueSNosWithTypes = () => {
+  const sNoSet = new Set<string>();
+  const sNoTypeMap = new Map<string, string>();
+  
+  // Add S.Nos from year slabs (step 2) - yearSlabs is available from component scope
+  yearSlabs.forEach((slab) => {
+    if (slab.sNo?.trim() !== "") {
+      sNoSet.add(slab.sNo);
+      sNoTypeMap.set(slab.sNo, slab.sNoType || 's_no');
+    }
+    
+    slab.paikyEntries?.forEach((entry) => {
+      if (entry.sNo?.trim() !== "") {
+        sNoSet.add(entry.sNo);
+        sNoTypeMap.set(entry.sNo, entry.sNoType || 's_no');
+      }
+    });
+    
+    slab.ekatrikaranEntries?.forEach((entry) => {
+      if (entry.sNo?.trim() !== "") {
+        sNoSet.add(entry.sNo);
+        sNoTypeMap.set(entry.sNo, entry.sNoType || 's_no');
+      }
+    });
+  });
+  
+  // Add S.Nos from step 1 (landBasicInfo) - landBasicInfo is available from component scope
+  if (landBasicInfo) {
+    // Survey Numbers from step 1
+    if (landBasicInfo.sNo && landBasicInfo.sNo.trim() !== "") {
+      const surveyNos = landBasicInfo.sNo.split(',').map(s => s.trim()).filter(s => s !== "");
+      surveyNos.forEach(sNo => {
+        sNoSet.add(sNo);
+        if (!sNoTypeMap.has(sNo)) {
+          sNoTypeMap.set(sNo, 's_no');
+        }
+      });
+    }
+    
+    // Block Number from step 1
+    if (landBasicInfo.blockNo && landBasicInfo.blockNo.trim() !== "") {
+      sNoSet.add(landBasicInfo.blockNo);
+      if (!sNoTypeMap.has(landBasicInfo.blockNo)) {
+        sNoTypeMap.set(landBasicInfo.blockNo, 'block_no');
+      }
+    }
+    
+    // Re-survey Number from step 1
+    if (landBasicInfo.reSurveyNo && landBasicInfo.reSurveyNo.trim() !== "") {
+      sNoSet.add(landBasicInfo.reSurveyNo);
+      if (!sNoTypeMap.has(landBasicInfo.reSurveyNo)) {
+        sNoTypeMap.set(landBasicInfo.reSurveyNo, 're_survey_no');
+      }
+    }
+  }
+  
+  return Array.from(sNoSet).map(sNo => ({
+    value: sNo,
+    type: sNoTypeMap.get(sNo) || 's_no',
+    label: `${sNo} (${sNoTypeMap.get(sNo) === 'block_no' ? 'Block' : 
+                     sNoTypeMap.get(sNo) === 're_survey_no' ? 'Re-survey' : 'Survey'})`
+  })).sort((a, b) => a.value.localeCompare(b.value, undefined, { numeric: true }));
 };
 
   const getPrimarySNoType = (affectedSNos: any[]): string => {
@@ -390,20 +676,20 @@ const formatDate = (dateString: string): string => {
     if (error) throw error
 
     const processedDetails: NondhDetail[] = nondhDetailsWithRelations?.map(detail => ({
-      id: detail.id,
-      nondhId: detail.nondh_id,
-      sNo: detail.s_no || '',
-      type: detail.type || 'Standard',
-      vigat: detail.vigat || '',
-      status: detail.status || 'pending',
-      date: detail.date || new Date().toISOString(),
-      hasDocuments: Boolean(detail.has_documents),
-      showInOutput: Boolean(detail.show_in_output),
-      createdAt: detail.created_at || new Date().toISOString(),
-      docUploadUrl: detail.doc_upload_url || null,
-      invalidReason: detail.invalid_reason || '',
-      hukamType: detail.hukam_type || ''
-    })) || []
+  id: detail.id,
+  nondhId: detail.nondh_id,
+  sNo: detail.s_no || '',
+  type: detail.type || 'Standard',
+  vigat: detail.vigat || '',
+  status: detail.status || 'pending',
+  hasDocuments: Boolean(detail.has_documents),
+  showInOutput: Boolean(detail.show_in_output),
+  createdAt: detail.created_at || new Date().toISOString(),
+  date: detail.date || detail.created_at || new Date().toISOString(),
+  docUploadUrl: detail.doc_upload_url || null,
+  invalidReason: detail.invalid_reason || '',
+  hukamType: detail.hukam_type || ''
+})) || []
 
     setNondhDetails(processedDetails)
     
@@ -414,7 +700,6 @@ const formatDate = (dateString: string): string => {
 
   const fetchPassbookData = async () => {
   try {
-    // Always fetch fresh nondhs data for passbook
     const { data: nondhsData, error: nondhError } = await LandRecordService.getNondhs(recordId)
     if (nondhError) throw nondhError
     
@@ -435,13 +720,13 @@ const formatDate = (dateString: string): string => {
       return
     }
 
+    const availableSNos = getUniqueSNosWithTypes(); // Get available S.Nos
     const passbookEntries: PassbookEntry[] = []
 
     nondhDetailsWithRelations.forEach(detail => {
       const nondh = freshNondhs.find(n => n.id === detail.nondh_id)
       const nondhNumber = nondh ? safeNondhNumber(nondh) : "0"
       
-      // Use the date from nondh_details, fallback to current date
       const relevantDate = detail.date || detail.created_at || new Date().toISOString()
 
       detail.owner_relations?.forEach(relation => {
@@ -456,7 +741,7 @@ const formatDate = (dateString: string): string => {
         }
 
         console.log('Entry affectedSNos before format:', nondh?.affected_s_nos);
-        const affectedSNosFormatted = nondh ? formatAffectedSNos(nondh.affected_s_nos) : relation.s_no || '';
+        const affectedSNosFormatted = nondh ? formatAffectedSNos(nondh.affected_s_nos, availableSNos) : relation.s_no || ''; // Pass availableSNos
         console.log('Entry affectedSNos after format:', affectedSNosFormatted);
         
         const entry = {
@@ -490,48 +775,51 @@ const formatDate = (dateString: string): string => {
 }
 
   const generateFilteredNondhs = () => {
-    console.log('generateFilteredNondhs - nondhs available:', nondhs.length);
+  console.log('generateFilteredNondhs - nondhs available:', nondhs.length);
   console.log('generateFilteredNondhs - nondhDetails available:', nondhDetails.length);
-    let outputNondhs = nondhDetails
-      .filter(detail => detail.showInOutput)
-      .map(detail => {
-         console.log('Processing detail:', detail.id, 'looking for nondh:', detail.nondhId);
+  
+  const availableSNos = getUniqueSNosWithTypes(); // Get available S.Nos
+  
+  let outputNondhs = nondhDetails
+    .filter(detail => detail.showInOutput)
+    .map(detail => {
+      console.log('Processing detail:', detail.id, 'looking for nondh:', detail.nondhId);
       const nondh = nondhs.find(n => n.id === detail.nondhId)
       console.log('Found nondh for detail:', nondh);
-        return {
-          ...detail,
-          nondhNumber: nondh ? safeNondhNumber(nondh) : "0",
-          affectedSNos: formatAffectedSNos(nondh?.affected_s_nos || [detail.sNo]),
-          nondhDocUrl: nondh?.nondh_doc_url || null
-        }
-      })
+      return {
+        ...detail,
+        nondhNumber: nondh ? safeNondhNumber(nondh) : "0",
+        affectedSNos: formatAffectedSNos(nondh?.affected_s_nos || [detail.sNo], availableSNos), // Pass availableSNos
+        nondhDocUrl: nondh?.nondh_doc_url || null
+      }
+    })
 
-    // Apply S.No filter
-    if (sNoFilter) {
-      outputNondhs = outputNondhs.filter(nondh => {
-        return nondh.affectedSNos.includes(sNoFilter) || nondh.sNo === sNoFilter;
-      });
-    }
-    
-    setFilteredNondhs(outputNondhs.sort(sortNondhsBySNoType));
+  // Apply S.No filter
+  if (sNoFilter) {
+    outputNondhs = outputNondhs.filter(nondh => {
+      return nondh.affectedSNos.includes(sNoFilter) || nondh.sNo === sNoFilter;
+    });
   }
+  
+  setFilteredNondhs(outputNondhs.sort(sortNondhsBySNoType));
+}
 
   const updateDateWiseFilter = () => {
   let filteredDetails = nondhDetails;
   
   if (dateFilter) {
-    // Change from createdAt to date
     filteredDetails = nondhDetails.filter(detail => detail.date?.includes(dateFilter));
   }
+  
+  const availableSNos = getUniqueSNosWithTypes(); // Get available S.Nos
   
   let mappedDetails = filteredDetails.map(detail => {
     const nondh = nondhs.find(n => n.id === detail.nondhId)
     return {
       ...detail,
       nondhNumber: nondh ? safeNondhNumber(nondh) : 0,
-      affectedSNos: formatAffectedSNos(nondh?.affected_s_nos || [detail.sNo]),
+      affectedSNos: formatAffectedSNos(nondh?.affected_s_nos || [detail.sNo], availableSNos), // Pass availableSNos
       nondhDocUrl: nondh?.nondh_doc_url || null,
-      // Ensure date is available
       date: detail.date || detail.createdAt
     }
   });
@@ -546,7 +834,7 @@ const formatDate = (dateString: string): string => {
   setDateWiseFilteredData(mappedDetails.sort(sortNondhsBySNoType));
 }
 
-  const exportToExcel = async () => {
+ const exportToExcel = async () => {
   if (!landBasicInfo) {
     toast({
       title: 'Error',
@@ -557,7 +845,10 @@ const formatDate = (dateString: string): string => {
   }
 
   try {
-   const formatAffectedSNos = (affectedSNos: any): string => {
+    // Get available S.Nos for filtering
+    const availableSNos = getUniqueSNosWithTypes();
+    
+    const formatAffectedSNos = (affectedSNos: any): string => {
       if (!affectedSNos) {
         return '-';
       }
@@ -595,23 +886,30 @@ const formatDate = (dateString: string): string => {
           return JSON.stringify(affectedSNos);
         }
 
+        // Filter out S.Nos that are not in available S.Nos (basic info/year slabs)
+        const availableSNosSet = new Set(availableSNos.map(s => s.value));
+        sNos = sNos.filter(sNo => {
+          const number = typeof sNo === 'object' ? sNo.number : sNo;
+          return availableSNosSet.has(number?.toString());
+        });
         
         // Format the S.Nos as simple numbers separated by commas
-if (sNos && sNos.length > 0) {
-  const result = sNos.map(sNo => {
-    if (typeof sNo === 'object' && sNo.number) {
-      return sNo.number.toString(); // Just return the number without type
-    }
-    return sNo.toString();
-  }).join(', ');
-  return result;
-}
+        if (sNos && sNos.length > 0) {
+          const result = sNos.map(sNo => {
+            if (typeof sNo === 'object' && sNo.number) {
+              return sNo.number.toString(); // Just return the number without type
+            }
+            return sNo.toString();
+          }).join(', ');
+          return result;
+        }
 
         return '-';
       } catch (error) {
         return typeof affectedSNos === 'string' ? affectedSNos : JSON.stringify(affectedSNos);
       }
     }
+    
     // Dynamically import xlsx
     const XLSX = await import('xlsx-js-style')
 
@@ -631,6 +929,7 @@ if (sNos && sNos.length > 0) {
 
     const sortedData = allData.sort(sortNondhsBySNoType)
 
+  
     // Format date as DDMMYYYY
     const formatDate = (dateStr: string) => {
       if (!dateStr) return '-'
@@ -766,9 +1065,92 @@ if (sNos && sNos.length > 0) {
   }
 }
 
-  const handleCompleteProcess = () => {
-    toast({ title: "Land records fetched successfully!" })
-    router.push('/land-master')
+const handleSendComment = async (message: string, recipients: string[], isPushForReview: boolean = false) => {
+  if (!recordId || !user?.primaryEmailAddress?.emailAddress) return;
+
+  try {
+    setSendingComment(true);
+
+    const toEmails = recipients.length > 0 ? recipients : null;
+
+    const chatData = await createChat({
+      from_email: user.primaryEmailAddress.emailAddress,
+      to_email: toEmails,
+      message: message,
+      land_record_id: recordId,
+      step: 6
+    });
+
+    const recipientText = toEmails 
+      ? `to ${toEmails.length} recipient(s)` 
+      : role === 'executioner'
+        ? 'to all managers/reviewers'
+        : 'to all executioners/reviewers';
+
+    await createActivityLog({
+      user_email: user.primaryEmailAddress.emailAddress,
+      land_record_id: recordId,
+      step: 6,
+      chat_id: chatData.id,
+      description: `Sent message ${recipientText}: ${message}`
+    });
+
+    if (isPushForReview) {
+      await LandRecordService.updateLandRecord(recordId, { status: 'review' });
+      
+      await createActivityLog({
+        user_email: user.primaryEmailAddress.emailAddress,
+        land_record_id: recordId,
+        step: 6,
+        chat_id: null,
+        description: `${role?.charAt(0).toUpperCase()}${role?.slice(1)} pushed the record for review. Status changed to Review.`
+      });
+
+      toast({ title: "Record pushed for review. Status changed to Review." });
+    } else {
+      toast({ title: "Message sent successfully" });
+    }
+
+    setShowCommentModal(false);
+  } catch (error) {
+    console.error('Error sending comment:', error);
+    toast({ 
+      title: "Error sending message", 
+      variant: "destructive" 
+    });
+  } finally {
+    setSendingComment(false);
+  }
+};
+
+  const handleCompleteProcess = async () => {
+    try {
+      // Update land record status to "review"
+      const { error } = await LandRecordService.updateLandRecord(recordId, {
+        status: "review"
+      });
+
+      if (error) throw error;
+
+      // Create activity log
+      await createActivityLog({
+        user_email: user?.primaryEmailAddress?.emailAddress || "",
+        land_record_id: recordId,
+        step: 6, // Output views is step 4
+        chat_id: null,
+        description: "Sent for review from output view"
+      });
+
+      toast({ title: "Process completed. Record sent for review!" });
+      router.push('/land-master');
+    } catch (err) {
+      console.error('Error completing process:', err);
+      toast({ 
+        title: "Error",
+        description: "Failed to complete process. Please try again.",
+        variant: "destructive"
+      });
+    }
   }
 
   const renderQueryListCard = (nondh: NondhDetail, index: number) => {    
@@ -968,41 +1350,32 @@ if (sNos && sNos.length > 0) {
   </div>
 
   {(() => {
-  const allNondhsData = nondhDetails.map((detail) => {
-    const nondh = nondhs.find((n) => n.id === detail.nondhId)
-    return {
-      ...detail,
-      nondhNumber: nondh?.number || 0,
-      affectedSNos: formatAffectedSNos(nondh?.affected_s_nos || [detail.sNo]),
-      nondhType: detail.type,
-      hukamType: detail.hukamType || '-',
-      nondhDocUrl: nondh?.nondh_doc_url || null
+    const availableSNos = getUniqueSNosWithTypes(); // Get available S.Nos
+    
+    const allNondhsData = nondhDetails.map((detail) => {
+      const nondh = nondhs.find((n) => n.id === detail.nondhId)
+      return {
+        ...detail,
+        nondhNumber: nondh?.number || 0,
+        affectedSNos: formatAffectedSNos(nondh?.affected_s_nos || [detail.sNo], availableSNos), // Pass availableSNos
+        nondhType: detail.type,
+        hukamType: detail.hukamType || '-',
+        nondhDocUrl: nondh?.nondh_doc_url || null
+      }
+    }).filter(nondh => {
+      if (!sNoFilter) return true;
+      return nondh.affectedSNos.includes(sNoFilter) || nondh.sNo === sNoFilter;
+    }).sort(sortNondhsBySNoType);
+
+    if (allNondhsData.length === 0) {
+      return (
+        <div className="text-center py-8">
+          <p className="text-gray-500 text-sm">
+            {sNoFilter ? 'No nondhs found for selected S.No' : 'No nondh data available'}
+          </p>
+        </div>
+      );
     }
-  }).filter(nondh => {
-    if (!sNoFilter) return true;
-    return nondh.affectedSNos.includes(sNoFilter) || nondh.sNo === sNoFilter;
-  }).sort(sortNondhsBySNoType);
-
-  if (allNondhsData.length === 0) {
-    return (
-      <div className="text-center py-8">
-        <p className="text-gray-500 text-sm">
-          {sNoFilter ? 'No nondhs found for selected S.No' : 'No nondh data available'}
-        </p>
-      </div>
-    );
-  }
-
-
-  if (allNondhsData.length === 0) {
-    return (
-      <div className="text-center py-8">
-        <p className="text-gray-500 text-sm">
-          {sNoFilter ? 'No nondhs found for selected S.No' : 'No nondh data available'}
-        </p>
-      </div>
-    );
-  }
 
   return (
     <>
@@ -1347,15 +1720,71 @@ if (sNos && sNos.length > 0) {
         </Tabs>
 
         <div className="flex flex-col sm:flex-row sm:justify-center items-stretch sm:items-center gap-4 mt-6 pt-4 border-t">
-          <Button 
-            onClick={handleCompleteProcess}
-            className="w-full sm:w-auto"
-            size="sm"
-          >
-            Back to Land Master
-          </Button>
-        </div>
+            
+  {(role === 'manager' || role === 'admin' || role === 'executioner') && landRecordStatus !== 'review' && ( // ADD landRecordStatus check
+  <Button 
+    onClick={async () => {
+      if (!recordId || !user?.primaryEmailAddress?.emailAddress) return;
+      try {
+        await LandRecordService.updateLandRecord(recordId, { status: 'review' });
+        await createActivityLog({
+          user_email: user.primaryEmailAddress.emailAddress,
+          land_record_id: recordId,
+          step: 6,
+          chat_id: null,
+          description: `${role?.charAt(0).toUpperCase()}${role?.slice(1)} pushed the record for review. Status changed to Review.`
+        });
+        setLandRecordStatus('review'); // UPDATE LOCAL STATE
+        toast({ title: "Record pushed for review. Status changed to Review." });
+        router.push('/land-master');
+      } catch (error) {
+        console.error('Error pushing for review:', error);
+        toast({ title: "Error pushing for review", variant: "destructive" });
+      }
+    }}
+    className="w-full sm:w-auto flex items-center gap-2"
+    size="sm"
+  >
+    Push for Review
+  </Button>
+)}
+  {(role === 'manager' || role === 'admin' || role === 'executioner') && (
+    <Button 
+      onClick={() => setShowCommentModal(true)}
+      className="w-full sm:w-auto flex items-center gap-2"
+      size="sm"
+      variant="outline"
+    >
+      <Send className="w-4 h-4" />
+      {role === 'executioner'
+        ? 'Send Message to Manager/Reviewer'
+        : 'Send Message to Executioner/Reviewer'}
+    </Button>
+  )}
+  
+  <Button 
+    onClick={() => {
+      toast({ title: "Returning to Land Master" });
+      router.push('/land-master');
+    }}
+    className="w-full sm:w-auto"
+    size="sm"
+  >
+    Back to Land Master
+  </Button>
+</div>
       </CardContent>
+{showCommentModal && (
+  <CommentModal
+    isOpen={showCommentModal}
+    onClose={() => setShowCommentModal(false)}
+    onSubmit={handleSendComment}
+    loading={sendingComment}
+    step={6}
+    userRole={role || ''}
+    landRecordStatus={landRecordStatus}
+  />
+)}
     </Card>
   )
 }

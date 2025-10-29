@@ -41,11 +41,11 @@ export default function NondhDetails() {
   const getStatusLabel = (status: string): string => {
     switch (status) {
       case 'valid':
-        return 'Pramaanik'
+        return 'Pramaanik (પ્રમાણિત)'
       case 'nullified':
-        return 'Na Manjoor'
+        return 'Na Manjoor (નામંજૂર)'
       case 'invalid':
-        return 'Radd'
+        return 'Radd (રદ)'
       default:
         return 'Pramaanik'
     }

@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Upload } from "lucide-react"
+import { Upload, Send, X, Loader2 } from "lucide-react"
 import { useLandRecord } from "@/contexts/land-record-context"
 import { supabase, uploadFile } from "@/lib/supabase"
 import { useToast } from "@/hooks/use-toast"
@@ -15,6 +15,10 @@ import { useRouter } from "next/navigation";
 import { promulgationData, getDistricts, getTalukas, getVillages, isPromulgation } from "@/lib/mock-data"
 import { useStepFormData } from "@/hooks/use-step-form-data"
 import type { LandBasicInfo } from "@/contexts/land-record-context"
+import { useUser } from "@clerk/nextjs"
+import { createActivityLog, createChat } from "@/lib/supabase"
+import { useUserRole } from '@/contexts/user-context';
+import { useRef } from 'react';
 
 const initialFormData: LandBasicInfo = {
   district: "",
@@ -66,6 +70,15 @@ interface AreaFieldsProps {
     square_meters?: number;
   }) => void;
   disabled?: boolean;
+}
+
+// Comment Modal Component
+interface CommentModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  onSubmit: (message: string, recipients: string[]) => Promise<void>;
+  loading?: boolean;
+  step: number;
 }
 
 const AreaFields = ({ area, onChange, disabled = false }: AreaFieldsProps) => {
@@ -461,23 +474,233 @@ const AreaFields = ({ area, onChange, disabled = false }: AreaFieldsProps) => {
   );
 };
 
+const CommentModal = ({ isOpen, onClose, onSubmit, loading = false, step }: CommentModalProps) => {
+  const [message, setMessage] = useState('');
+  const [showMentionDropdown, setShowMentionDropdown] = useState(false);
+  const [mentionSearch, setMentionSearch] = useState('');
+  const [selectedRecipients, setSelectedRecipients] = useState<string[]>([]);
+  const [cursorPosition, setCursorPosition] = useState(0);
+  const [users, setUsers] = useState<User[]>([]);
+  const { user } = useUser();
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // Fetch users when modal opens
+  useEffect(() => {
+    if (isOpen) {
+      const fetchUsers = async () => {
+        try {
+          const response = await fetch('/api/users/list');
+          if (!response.ok) throw new Error('Failed to fetch users');
+          const data = await response.json();
+          setUsers(data.users);
+        } catch (error) {
+          console.error('Error fetching users:', error);
+        }
+      };
+      fetchUsers();
+    }
+  }, [isOpen]);
+
+  const handleMessageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    const position = e.target.selectionStart || 0;
+    
+    setMessage(value);
+    setCursorPosition(position);
+
+    // Check for @ mention
+    const textBeforeCursor = value.substring(0, position);
+    const lastAtIndex = textBeforeCursor.lastIndexOf('@');
+    
+    if (lastAtIndex !== -1) {
+      const afterAt = textBeforeCursor.substring(lastAtIndex + 1);
+      const beforeAt = textBeforeCursor.substring(0, lastAtIndex);
+      if (beforeAt === '' || beforeAt.endsWith(' ')) {
+        setMentionSearch(afterAt);
+        setShowMentionDropdown(true);
+        return;
+      }
+    }
+    
+    setShowMentionDropdown(false);
+  };
+
+  const handleMentionSelect = (userEmail: string, userName: string) => {
+    const textBeforeCursor = message.substring(0, cursorPosition);
+    const textAfterCursor = message.substring(cursorPosition);
+    const lastAtIndex = textBeforeCursor.lastIndexOf('@');
+    
+    const beforeMention = message.substring(0, lastAtIndex);
+    const newText = beforeMention + `@${userName} ` + textAfterCursor;
+    
+    setMessage(newText);
+    setSelectedRecipients([...selectedRecipients, userEmail]);
+    setShowMentionDropdown(false);
+    setMentionSearch('');
+    
+    setTimeout(() => {
+      inputRef.current?.focus();
+    }, 0);
+  };
+
+  const removeMention = (email: string) => {
+    setSelectedRecipients(selectedRecipients.filter(e => e !== email));
+  };
+
+  const getUserByEmail = (email: string) => {
+    return users.find(u => u.email === email);
+  };
+
+  const filteredUsers = users
+    .filter(u => u.email !== user?.primaryEmailAddress?.emailAddress)
+    .filter(u => !selectedRecipients.includes(u.email))
+    .filter(u => 
+      mentionSearch === '' || 
+      u.fullName.toLowerCase().includes(mentionSearch.toLowerCase()) ||
+      u.email.toLowerCase().includes(mentionSearch.toLowerCase())
+    );
+
+  const handleSubmit = async () => {
+    if (!message.trim()) return;
+    await onSubmit(message, selectedRecipients);
+    setMessage('');
+    setSelectedRecipients([]);
+  };
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+      <Card className="w-full max-w-lg max-h-[80vh] overflow-hidden flex flex-col">
+        <CardHeader className="flex-shrink-0 border-b bg-white sticky top-0 z-10">
+          <div className="flex justify-between items-center">
+            <CardTitle>Send Message to Executioner - Step {step}</CardTitle>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={onClose}
+              disabled={loading}
+            >
+              <X className="w-4 h-4" />
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-4 overflow-y-auto flex-1 p-6 pt-4">
+          {/* Selected Recipients Pills */}
+          {selectedRecipients.length > 0 && (
+            <div className="flex flex-wrap gap-2 mb-2">
+              {selectedRecipients.map(email => {
+                const recipient = getUserByEmail(email);
+                return (
+                  <span key={email} className="inline-flex items-center gap-1 px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-sm">
+                    {recipient?.fullName || email}
+                    <button
+                      onClick={() => removeMention(email)}
+                      className="hover:text-blue-900 text-xs"
+                    >
+                      ×
+                    </button>
+                  </span>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Message Input */}
+          <div className="space-y-2">
+            <Label htmlFor="comment-message">Message</Label>
+            <div className="relative">
+              <input
+                ref={inputRef}
+                id="comment-message"
+                type="text"
+                value={message}
+                onChange={handleMessageChange}
+                placeholder="Type @ to mention someone or send to all executioners..."
+                disabled={loading}
+                onKeyPress={(e) => e.key === 'Enter' && !showMentionDropdown && handleSubmit()}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              />
+
+              {/* Mention Dropdown */}
+              {showMentionDropdown && filteredUsers.length > 0 && (
+                <div className="absolute top-full left-0 mt-1 w-full bg-white border border-gray-300 rounded-lg shadow-lg max-h-48 overflow-y-auto z-20">
+                  {filteredUsers.map(u => (
+                    <button
+                      key={u.id}
+                      onClick={() => handleMentionSelect(u.email, u.fullName)}
+                      className="w-full text-left px-4 py-2 hover:bg-gray-100 flex items-center justify-between border-b border-gray-100 last:border-b-0"
+                    >
+                      <div className="flex flex-col items-start">
+                        <span className="font-medium text-sm">{u.fullName}</span>
+                        <span className="text-xs text-gray-500">{u.email}</span>
+                      </div>
+                      <span className="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded">
+                        {u.role.charAt(0).toUpperCase() + u.role.slice(1)}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            <p className="text-xs text-gray-500">
+              Type @ to mention specific users, or send to all executioners
+            </p>
+          </div>
+          
+          <div className="flex gap-2 pt-4">
+            <Button
+              variant="outline"
+              onClick={onClose}
+              disabled={loading}
+              className="flex-1"
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleSubmit}
+              disabled={loading || !message.trim()}
+              className="flex-1 flex items-center gap-2"
+            >
+              {loading ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <Send className="w-4 h-4" />
+              )}
+              Send Message
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+};
+
+
 export default function LandBasicInfoComponent() {
   const { 
     landBasicInfo, 
     setLandBasicInfo, 
-    setCurrentStep, 
+    setCurrentStep,
+    recordId, 
     setHasUnsavedChanges, 
     currentStep, 
     hasUnsavedChanges 
   } = useLandRecord()
   const { toast } = useToast()
   const router = useRouter()
-  const [loading, setLoading] = useState(false)
+  const { user } = useUser()
+const [loading, setLoading] = useState(false)
   const [uploadedFileName, setUploadedFileName] = useState<string>("")
   const [validationErrors, setValidationErrors] = useState<ValidationErrors>({})
   const [duplicateRecord, setDuplicateRecord] = useState<any>(null)
   const [showDuplicateDialog, setShowDuplicateDialog] = useState(false)
-
+  const [showCommentModal, setShowCommentModal] = useState(false)
+  const [savedRecordId, setSavedRecordId] = useState<string | null>(null)
+  const [sendingComment, setSendingComment] = useState(false)
+  const role = useUserRole();
+   const [showNavigationModal, setShowNavigationModal] = useState(false);
+  
   // Form data with proper initialization
   const { getStepData, updateStepData } = useStepFormData(currentStep)
   
@@ -672,116 +895,181 @@ const validateForm = (): boolean => {
     setUploadedFileName("")
   }
 
-  // Submission
-const handleSubmit = async () => {
-  // Validate all required fields
-  if (!validateForm()) {
-    return
-  }
+  // Handle comment submission
+  const handleSendComment = async (message: string, recipients: string[]) => {
+    if (!savedRecordId || !user?.primaryEmailAddress?.emailAddress) return;
 
-  setLoading(true)
-  try {
-    // Always save square meters value, regardless of unit chosen
-    let areaValueInSqm = 0;
-    
-    if (formData.area.unit === 'acre_guntha') {
-      // Use the calculated sq_m value from AreaFields component
-      areaValueInSqm = formData.area.sq_m || 0;
-    } else if (formData.area.unit === 'sq_m') {
-      // Use the value directly for sq_m unit
-      areaValueInSqm = formData.area.value || 0;
+    try {
+      setSendingComment(true);
+
+      const toEmails = recipients.length > 0 ? recipients : null;
+
+      const chatData = await createChat({
+        from_email: user.primaryEmailAddress.emailAddress,
+        to_email: toEmails,
+        message: message,
+        land_record_id: savedRecordId,
+        step: 1
+      });
+
+      const recipientText = toEmails 
+        ? `to ${toEmails.length} recipient(s)` 
+        : 'to all executioners';
+
+      await createActivityLog({
+        user_email: user.primaryEmailAddress.emailAddress,
+        land_record_id: savedRecordId,
+        step: 1,
+        chat_id: chatData.id,
+        description: `Sent message ${recipientText}: ${message}`
+      });
+
+      toast({ title: "Message sent successfully" });
+      setShowCommentModal(false);
+       setShowNavigationModal(true);
+    } catch (error) {
+      console.error('Error sending comment:', error);
+      toast({ 
+        title: "Error sending message", 
+        variant: "destructive" 
+      });
+    } finally {
+      setSendingComment(false);
+    }
+  };
+
+  // Handle navigation after comment
+  const handleContinueToStep2 = () => {
+    setCurrentStep(2);
+    setShowCommentModal(false);
+  };
+
+  const handleBackToLandMaster = () => {
+    router.push('/land-master');
+    setShowCommentModal(false);
+  };
+
+  // Main submission
+  const handleSubmit = async () => {
+    if (!validateForm()) {
+      return
     }
 
-    // Check for duplicate records
-    const duplicateCheckData = {
-      district: formData.district,
-      taluka: formData.taluka,
-      village: formData.village,
-      block_no: formData.blockNo,
-      re_survey_no: formData.reSurveyNo || undefined,
-      excludeId: landBasicInfo?.id // Exclude current record when updating
-    }
+    setLoading(true)
+    try {
+      // Always save square meters value, regardless of unit chosen
+      let areaValueInSqm = 0;
+      
+      if (formData.area.unit === 'acre_guntha') {
+        areaValueInSqm = formData.area.sq_m || 0;
+      } else if (formData.area.unit === 'sq_m') {
+        areaValueInSqm = formData.area.value || 0;
+      }
 
-    const { data: duplicate, error: duplicateError } = await LandRecordService.checkDuplicateLandRecord(duplicateCheckData)
-    
-    if (duplicateError) {
-      console.error('Error checking duplicate:', duplicateError)
-      // Continue with save if duplicate check fails (don't block user due to check error)
-    }
+      // Check for duplicate records
+      const duplicateCheckData = {
+        district: formData.district,
+        taluka: formData.taluka,
+        village: formData.village,
+        block_no: formData.blockNo,
+        re_survey_no: formData.reSurveyNo || undefined,
+        excludeId: landBasicInfo?.id
+      }
 
-    // If duplicate found and we're not updating the same record
-    if (duplicate && duplicate.id !== landBasicInfo?.id) {
-      setDuplicateRecord(duplicate)
-      setShowDuplicateDialog(true)
+      const { data: duplicate, error: duplicateError } = await LandRecordService.checkDuplicateLandRecord(duplicateCheckData)
+      
+      if (duplicateError) {
+        console.error('Error checking duplicate:', duplicateError)
+      }
+
+      if (duplicate && duplicate.id !== landBasicInfo?.id) {
+        setDuplicateRecord(duplicate)
+        setShowDuplicateDialog(true)
+        setLoading(false)
+        return
+      }
+
+      // Map form data to database schema
+      const landRecordData = {
+        district: formData.district,
+        taluka: formData.taluka,
+        village: formData.village,
+        area_value: areaValueInSqm,
+        area_unit: 'sq_m',
+        s_no_type: formData.sNoType || 's_no',
+        s_no: formData.sNo || formData.blockNo,
+        is_promulgation: formData.isPromulgation || false,
+        block_no: formData.blockNo,
+        re_survey_no: formData.reSurveyNo || null,
+        integrated_712: formData.integrated712 || null,
+        integrated_712_filename: formData.integrated712FileName || null,
+        current_step: 1,
+        status: 'initiated'
+      }
+
+      // Add ID if updating existing record
+      if (landBasicInfo?.id) {
+        landRecordData.id = landBasicInfo.id
+      }
+
+      const { data: result, error } = await LandRecordService.saveLandRecord(landRecordData)
+      
+      if (error) throw error
+
+      // Update context with the saved data
+      const updatedInfo: LandBasicInfo = {
+        id: result.id,
+        district: formData.district, 
+        taluka: formData.taluka, 
+        village: formData.village, 
+        area: formData.area,
+        sNoType: formData.sNoType, 
+        sNo: formData.sNo,
+        isPromulgation: formData.isPromulgation, 
+        blockNo: formData.blockNo, 
+        reSurveyNo: formData.reSurveyNo, 
+        integrated712: formData.integrated712,
+        integrated712FileName: formData.integrated712FileName
+      }
+
+      setLandBasicInfo(updatedInfo)
+      setSavedRecordId(result.id)
+      
+      // Update step data
+      updateStepData({
+        landBasicInfo: updatedInfo
+      })
+
+      // Create activity log
+      await createActivityLog({
+        user_email: user?.primaryEmailAddress?.emailAddress || "",
+        land_record_id: result.id,
+        step: 1,
+        chat_id: null,
+        description: `Added land basic information for ${formData.village}, ${formData.taluka}, ${formData.district}`
+      });
+
+      setHasUnsavedChanges(currentStep, false)
+      toast({ title: "Land basic info saved successfully" })
+      
+       if (role === 'manager' || role === 'admin') {
+        setShowCommentModal(true);
+      } else {
+        // For other roles, navigate directly to step 2
+        setCurrentStep(2);
+      }
+      
+    } catch (error) {
+      console.error('Error saving land record:', error)
+      toast({ 
+        title: "Error saving data", 
+        description: error instanceof Error ? error.message : "Please try again",
+        variant: "destructive" 
+      })
+    } finally {
       setLoading(false)
-      return // Stop the save process
     }
-
-    // Map form data to database schema - use default values for required fields
-    const landRecordData = {
-      district: formData.district,
-      taluka: formData.taluka,
-      village: formData.village,
-      area_value: areaValueInSqm, // Always save sqm value
-      area_unit: 'sq_m', // Always save as sq_m in database
-      s_no_type: formData.sNoType || 's_no', // Default type
-      s_no: formData.sNo || formData.blockNo, // Use blockNo as fallback for s_no
-      is_promulgation: formData.isPromulgation || false,
-      block_no: formData.blockNo,
-      re_survey_no: formData.reSurveyNo || null,
-      integrated_712: formData.integrated712 || null,
-      integrated_712_filename: formData.integrated712FileName || null,
-      current_step: 1,
-      status: 'draft'
-    }
-
-    // Add ID if updating existing record
-    if (landBasicInfo?.id) {
-      landRecordData.id = landBasicInfo.id
-    }
-
-    const { data: result, error } = await LandRecordService.saveLandRecord(landRecordData)
-    
-    if (error) throw error
-
-    // Update context with the saved data
-    const updatedInfo: LandBasicInfo = {
-      id: result.id,
-      district: formData.district, 
-      taluka: formData.taluka, 
-      village: formData.village, 
-      area: formData.area, // Keep original area object with user's chosen unit
-      sNoType: formData.sNoType, 
-      sNo: formData.sNo,
-      isPromulgation: formData.isPromulgation, 
-      blockNo: formData.blockNo, 
-      reSurveyNo: formData.reSurveyNo, 
-      integrated712: formData.integrated712,
-      integrated712FileName: formData.integrated712FileName
-    }
-
-    setLandBasicInfo(updatedInfo)
-    
-    // Update step data
-    updateStepData({
-      landBasicInfo: updatedInfo
-    })
-
-    setHasUnsavedChanges(currentStep, false)
-    toast({ title: "Land basic info saved successfully" })
-    setCurrentStep(2)
-    
-  } catch (error) {
-    console.error('Error saving land record:', error)
-    toast({ 
-      title: "Error saving data", 
-      description: error instanceof Error ? error.message : "Please try again",
-      variant: "destructive" 
-    })
-  } finally {
-    setLoading(false)
   }
-}
 
 const handleNavigateToDuplicate = (mode: 'edit' | 'view') => {
   if (!duplicateRecord) return;
@@ -796,237 +1084,283 @@ const handleCloseDuplicateDialog = () => {
   setDuplicateRecord(null);
 };
 
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Step 1: Land Basic Information</CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-6">
-        {/* Location Selection */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div className="space-y-2">
-            <Label>District *</Label>
-            <Select value={district} onValueChange={handleDistrictChange}>
-              <SelectTrigger className={validationErrors.district ? "border-red-500" : ""}>
-                <SelectValue placeholder="Select District" />
-              </SelectTrigger>
-              <SelectContent>
-                {getDistricts().map((dist) => (
-                  <SelectItem key={dist} value={dist}>{dist}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            {validationErrors.district && (
-              <p className="text-sm text-red-600">{validationErrors.district}</p>
-            )}
-          </div>
-
-          <div className="space-y-2">
-            <Label>Taluka *</Label>
-            <Select value={taluka} onValueChange={handleTalukaChange} disabled={!district}>
-              <SelectTrigger className={validationErrors.taluka ? "border-red-500" : ""}>
-                <SelectValue placeholder="Select Taluka" />
-              </SelectTrigger>
-              <SelectContent>
-                {getTalukas(district).map((tal) => (
-                  <SelectItem key={tal} value={tal}>{tal}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            {validationErrors.taluka && (
-              <p className="text-sm text-red-600">{validationErrors.taluka}</p>
-            )}
-          </div>
-
-          <div className="space-y-2">
-            <Label>Village *</Label>
-            <Select value={village} onValueChange={handleVillageChange} disabled={!taluka}>
-              <SelectTrigger className={validationErrors.village ? "border-red-500" : ""}>
-                <SelectValue placeholder="Select Village" />
-              </SelectTrigger>
-              <SelectContent>
-                {getVillages(district, taluka).map((vill) => (
-                  <SelectItem key={vill} value={vill}>{vill}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            {validationErrors.village && (
-              <p className="text-sm text-red-600">{validationErrors.village}</p>
-            )}
-          </div>
-        </div>
-
-{/* Area Fields */}
-<div className="space-y-2">
-  <Label>Land Area *</Label>
-  <AreaFields
-    area={formData.area}
-    onChange={(newArea) => updateFormField({ area: newArea })}
-    disabled={loading}
-  />
-  {validationErrors.area && (
-    <p className="text-sm text-red-600">{validationErrors.area}</p>
-  )}
-</div>
-
-        {/* Promulgation Display */}
-        {formData.village && formData.isPromulgation !== null && (
-          <div>
-            <Label>Promulgation Status:</Label>{" "}
-            <span className={formData.isPromulgation ? "text-green-600" : "text-red-600"}>
-              {formData.isPromulgation ? "Yes" : "No"}
-            </span>
-          </div>
-        )}
-
-        {/* Block No - Always show */}
-        <div className="space-y-2">
-          <Label htmlFor="block-no">Block No *</Label>
-          <Input
-            id="block-no"
-            value={formData.blockNo}
-            onChange={(e) => updateFormField({ blockNo: e.target.value })}
-            placeholder="Enter Block No"
-            className={validationErrors.blockNo ? "border-red-500" : ""}
-          />
-          {validationErrors.blockNo && (
-            <p className="text-sm text-red-600">{validationErrors.blockNo}</p>
-          )}
-        </div>
-
-        {/* Re Survey No - Only show if promulgation is Yes */}
-        {formData.isPromulgation && (
-          <div className="p-4 border rounded-lg bg-blue-50">
+   return (
+    <>
+      <Card>
+        <CardHeader>
+          <CardTitle>Step 1: Land Basic Information</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          {/* Your existing form content remains exactly the same */}
+          {/* Location Selection */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div className="space-y-2">
-              <Label htmlFor="re-survey-no">Re Survey No *</Label>
-              <Input
-                id="re-survey-no"
-                value={formData.reSurveyNo}
-                onChange={(e) => updateFormField({ reSurveyNo: e.target.value })}
-                placeholder="Enter Re Survey No"
-                className={validationErrors.reSurveyNo ? "border-red-500" : ""}
-              />
-              {validationErrors.reSurveyNo && (
-                <p className="text-sm text-red-600">{validationErrors.reSurveyNo}</p>
+              <Label>District *</Label>
+              <Select value={district} onValueChange={handleDistrictChange}>
+                <SelectTrigger className={validationErrors.district ? "border-red-500" : ""}>
+                  <SelectValue placeholder="Select District" />
+                </SelectTrigger>
+                <SelectContent>
+                  {getDistricts().map((dist) => (
+                    <SelectItem key={dist} value={dist}>{dist}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {validationErrors.district && (
+                <p className="text-sm text-red-600">{validationErrors.district}</p>
+              )}
+            </div>
+
+            <div className="space-y-2">
+              <Label>Taluka *</Label>
+              <Select value={taluka} onValueChange={handleTalukaChange} disabled={!district}>
+                <SelectTrigger className={validationErrors.taluka ? "border-red-500" : ""}>
+                  <SelectValue placeholder="Select Taluka" />
+                </SelectTrigger>
+                <SelectContent>
+                  {getTalukas(district).map((tal) => (
+                    <SelectItem key={tal} value={tal}>{tal}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {validationErrors.taluka && (
+                <p className="text-sm text-red-600">{validationErrors.taluka}</p>
+              )}
+            </div>
+
+            <div className="space-y-2">
+              <Label>Village *</Label>
+              <Select value={village} onValueChange={handleVillageChange} disabled={!taluka}>
+                <SelectTrigger className={validationErrors.village ? "border-red-500" : ""}>
+                  <SelectValue placeholder="Select Village" />
+                </SelectTrigger>
+                <SelectContent>
+                  {getVillages(district, taluka).map((vill) => (
+                    <SelectItem key={vill} value={vill}>{vill}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {validationErrors.village && (
+                <p className="text-sm text-red-600">{validationErrors.village}</p>
               )}
             </div>
           </div>
-        )}
 
-        {/* Document Upload */}
-        <div className="space-y-2">
-          <Label htmlFor="integrated-712">Integrated 7/12 Document *</Label>
-          <div className="flex items-center gap-4">
-            <div className="relative">
-              <input
-                id="integrated-712"
-                type="file"
-                accept=".pdf,.jpg,.jpeg,.png"
-                onChange={(e) => {
-                  const file = e.target.files?.[0]
-                  if (file) {
-                    handleFileUpload(file)
-                    e.target.value = ''
-                  }
-                }}
-                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                disabled={loading}
-              />
-              <Button 
-                type="button" 
-                variant="outline" 
-                disabled={loading}
-                className={`flex items-center gap-2 bg-blue-600 text-white border-blue-600 hover:bg-blue-700 disabled:opacity-50 ${
-                  validationErrors.integrated712 ? 'border-red-500' : ''
-                }`}
-              >
-                <Upload className="w-4 h-4" />
-                {loading ? "Uploading..." : "Choose File"}
-              </Button>
+          {/* Area Fields */}
+          <div className="space-y-2">
+            <Label>Land Area *</Label>
+            <AreaFields
+              area={formData.area}
+              onChange={(newArea) => updateFormField({ area: newArea })}
+              disabled={loading}
+            />
+            {validationErrors.area && (
+              <p className="text-sm text-red-600">{validationErrors.area}</p>
+            )}
+          </div>
+
+          {/* Promulgation Display */}
+          {formData.village && formData.isPromulgation !== null && (
+            <div>
+              <Label>Promulgation Status:</Label>{" "}
+              <span className={formData.isPromulgation ? "text-green-600" : "text-red-600"}>
+                {formData.isPromulgation ? "Yes" : "No"}
+              </span>
             </div>
-            {uploadedFileName && (
-              <div className="flex items-center gap-2 px-3 py-2 bg-green-50 border border-green-200 rounded-md">
-                <span className="text-sm text-green-800 max-w-[200px] truncate" title={uploadedFileName}>
-                  {uploadedFileName}
-                </span>
-                <button
-                  type="button"
-                  onClick={handleRemoveFile}
-                  className="text-green-600 hover:text-green-800 text-lg leading-none"
-                  title="Remove file"
-                >
-                  ×
-                </button>
-              </div>
-            )}
-          </div>
-          {validationErrors.integrated712 && (
-            <p className="text-sm text-red-600">{validationErrors.integrated712}</p>
           )}
-          <p className="text-xs text-gray-500">
-            Supported formats: PDF, JPG, JPEG, PNG 
-          </p>
-        </div>
 
-        {/* Submit Button */}
-        <div className="flex justify-end">
-          <Button onClick={handleSubmit} disabled={loading} className="flex items-center gap-2">
-            {loading ? "Saving..." : "Save & Continue"}        
-          </Button>
-        </div>
-        {/* Duplicate Record Dialog */}
-{showDuplicateDialog && duplicateRecord && (
-  <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-    <Card className="w-full max-w-md">
-      <CardHeader>
-        <CardTitle className="text-yellow-600">Duplicate Land Record Found</CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <div className="text-sm text-gray-600">
-          <p>A land record with the same details already exists:</p>
-          <div className="mt-3 p-3 bg-yellow-50 border border-yellow-200 rounded-md">
-            <p><strong>District:</strong> {duplicateRecord.district}</p>
-            <p><strong>Taluka:</strong> {duplicateRecord.taluka}</p>
-            <p><strong>Village:</strong> {duplicateRecord.village}</p>
-            <p><strong>Block No:</strong> {duplicateRecord.block_no}</p>
-            {duplicateRecord.re_survey_no && (
-              <p><strong>Re-Survey No:</strong> {duplicateRecord.re_survey_no}</p>
+          {/* Block No */}
+          <div className="space-y-2">
+            <Label htmlFor="block-no">Block No *</Label>
+            <Input
+              id="block-no"
+              value={formData.blockNo}
+              onChange={(e) => updateFormField({ blockNo: e.target.value })}
+              placeholder="Enter Block No"
+              className={validationErrors.blockNo ? "border-red-500" : ""}
+            />
+            {validationErrors.blockNo && (
+              <p className="text-sm text-red-600">{validationErrors.blockNo}</p>
             )}
           </div>
-          <p className="mt-3">Please modify the land information to create a unique record or navigate to the existing record.</p>
-        </div>
-        
-        <div className="flex flex-col sm:flex-row gap-2 pt-2">
-          <Button
-            variant="outline"
-            className="flex-1"
-            onClick={() => handleNavigateToDuplicate('view')}
-          >
-            View Existing Record
-          </Button>
-          <Button
-            variant="outline"
-            className="flex-1"
-            onClick={() => handleNavigateToDuplicate('edit')}
-          >
-            Edit Existing Record
-          </Button>
-        </div>
 
-        <div className="pt-2">
-          <Button
-            variant="default"
-            className="w-full"
-            onClick={handleCloseDuplicateDialog}
-          >
-            Close & Modify Form
-          </Button>
-        </div>
-      </CardContent>
-    </Card>
-  </div>
-)}
-      </CardContent>
-    </Card>
+          {/* Re Survey No */}
+          {formData.isPromulgation && (
+            <div className="p-4 border rounded-lg bg-blue-50">
+              <div className="space-y-2">
+                <Label htmlFor="re-survey-no">Re Survey No *</Label>
+                <Input
+                  id="re-survey-no"
+                  value={formData.reSurveyNo}
+                  onChange={(e) => updateFormField({ reSurveyNo: e.target.value })}
+                  placeholder="Enter Re Survey No"
+                  className={validationErrors.reSurveyNo ? "border-red-500" : ""}
+                />
+                {validationErrors.reSurveyNo && (
+                  <p className="text-sm text-red-600">{validationErrors.reSurveyNo}</p>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Document Upload */}
+          <div className="space-y-2">
+            <Label htmlFor="integrated-712">Integrated 7/12 Document *</Label>
+            <div className="flex items-center gap-4">
+              <div className="relative">
+                <input
+                  id="integrated-712"
+                  type="file"
+                  accept=".pdf,.jpg,.jpeg,.png"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0]
+                    if (file) {
+                      handleFileUpload(file)
+                      e.target.value = ''
+                    }
+                  }}
+                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                  disabled={loading}
+                />
+                <Button 
+                  type="button" 
+                  variant="outline" 
+                  disabled={loading}
+                  className={`flex items-center gap-2 bg-blue-600 text-white border-blue-600 hover:bg-blue-700 disabled:opacity-50 ${
+                    validationErrors.integrated712 ? 'border-red-500' : ''
+                  }`}
+                >
+                  <Upload className="w-4 h-4" />
+                  {loading ? "Uploading..." : "Choose File"}
+                </Button>
+              </div>
+              {uploadedFileName && (
+                <div className="flex items-center gap-2 px-3 py-2 bg-green-50 border border-green-200 rounded-md">
+                  <span className="text-sm text-green-800 max-w-[200px] truncate" title={uploadedFileName}>
+                    {uploadedFileName}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={handleRemoveFile}
+                    className="text-green-600 hover:text-green-800 text-lg leading-none"
+                    title="Remove file"
+                  >
+                    ×
+                  </button>
+                </div>
+              )}
+            </div>
+            {validationErrors.integrated712 && (
+              <p className="text-sm text-red-600">{validationErrors.integrated712}</p>
+            )}
+            <p className="text-xs text-gray-500">
+              Supported formats: PDF, JPG, JPEG, PNG 
+            </p>
+          </div>
+
+          {/* Submit Button */}
+          <div className="flex justify-end">
+            <Button onClick={handleSubmit} disabled={loading} className="flex items-center gap-2">
+              {loading ? "Saving..." : "Save & Continue"}        
+            </Button>
+          </div>
+
+          {/* Duplicate Record Dialog */}
+          {showDuplicateDialog && duplicateRecord && (
+            <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+              <Card className="w-full max-w-md">
+                <CardHeader>
+                  <CardTitle className="text-yellow-600">Duplicate Land Record Found</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="text-sm text-gray-600">
+                    <p>A land record with the same details already exists:</p>
+                    <div className="mt-3 p-3 bg-yellow-50 border border-yellow-200 rounded-md">
+                      <p><strong>District:</strong> {duplicateRecord.district}</p>
+                      <p><strong>Taluka:</strong> {duplicateRecord.taluka}</p>
+                      <p><strong>Village:</strong> {duplicateRecord.village}</p>
+                      <p><strong>Block No:</strong> {duplicateRecord.block_no}</p>
+                      {duplicateRecord.re_survey_no && (
+                        <p><strong>Re-Survey No:</strong> {duplicateRecord.re_survey_no}</p>
+                      )}
+                    </div>
+                    <p className="mt-3">Please modify the land information to create a unique record or navigate to the existing record.</p>
+                  </div>
+                  
+                  <div className="flex flex-col sm:flex-row gap-2 pt-2">
+                    <Button
+                      variant="outline"
+                      className="flex-1"
+                      onClick={() => handleNavigateToDuplicate('view')}
+                    >
+                      View Existing Record
+                    </Button>
+                    <Button
+                      variant="outline"
+                      className="flex-1"
+                      onClick={() => handleNavigateToDuplicate('edit')}
+                    >
+                      Edit Existing Record
+                    </Button>
+                  </div>
+
+                  <div className="pt-2">
+                    <Button
+                      variant="default"
+                      className="w-full"
+                      onClick={handleCloseDuplicateDialog}
+                    >
+                      Close & Modify Form
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Comment Modal */}
+      <CommentModal
+        isOpen={showCommentModal}
+        onClose={() => setShowCommentModal(false)}
+        onSubmit={handleSendComment}
+        loading={sendingComment}
+        step={currentStep}
+      />
+
+      {/* Navigation Modal after sending comment */}
+     {showNavigationModal && (role === 'manager' || role === 'admin') && (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+      <Card className="w-full max-w-md">
+        <CardHeader>
+          <CardTitle>Next Steps</CardTitle>
+          <p className="text-sm text-muted-foreground">
+            {role === 'manager' || role === 'admin' 
+              ? 'Message sent successfully! What would you like to do next?'
+              : 'Data saved successfully! What would you like to do next?'}
+          </p>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex flex-col gap-3">
+            <Button
+              onClick={handleContinueToStep2}
+              className="w-full"
+            >
+              Continue to Step 2
+            </Button>
+            <Button
+              variant="outline"
+              onClick={handleBackToLandMaster}
+              className="w-full"
+            >
+              Back to Land Master
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  )}
+    </>
   )
 }

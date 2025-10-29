@@ -13,6 +13,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { LandRecordService, convertToSquareMeters, convertFromSquareMeters } from "@/lib/supabase"
 import { useToast } from "@/hooks/use-toast"
 import { supabase } from "@/lib/supabase"
+import * as XLSX from 'xlsx-js-style';
 
 interface PassbookEntry {
   id: string
@@ -229,53 +230,98 @@ export default function PassbookLedger() {
     {} as Record<string, typeof filteredEntries>,
   )
 
-  const handlePrint = () => {
-    window.print()
-  }
+  // const handlePrint = () => {
+  //   window.print()
+  // }
 
-  const handleExport = () => {
-    if (filteredEntries.length === 0) {
-      toast({
-        title: 'No Data',
-        description: 'No data available to export',
-        variant: 'destructive'
-      })
-      return
-    }
-
-    const csvContent = [
-      ["Year", "Owner Name", "Owned Area", "Survey Number", "Survey Number Type", "Nondh Number", "Created Date", "Village", "Taluka", "District"],
-      ...filteredEntries.map((entry) => [
-        entry.year,
-        entry.ownerName,
-        formatArea(entry),
-        entry.surveyNumber,
-        entry.surveyNumberType,
-        entry.nondhNumber,
-        new Date(entry.createdAt).toLocaleDateString(),
-        entry.village,
-        entry.taluka,
-        entry.district
-      ]),
-    ]
-      .map((row) => row.map(cell => 
-        typeof cell === 'string' && cell.includes(',') ? `"${cell}"` : cell
-      ).join(","))
-      .join("\n")
-
-    const blob = new Blob([csvContent], { type: "text/csv" })
-    const url = window.URL.createObjectURL(blob)
-    const a = document.createElement("a")
-    a.href = url
-    a.download = `passbook-ledger-${new Date().toISOString().split('T')[0]}.csv`
-    a.click()
-    window.URL.revokeObjectURL(url)
-
+  const handleExportToExcel = (filteredEntries, formatArea, toast) => {
+  if (filteredEntries.length === 0) {
     toast({
-      title: 'Success',
-      description: 'Passbook ledger exported successfully',
-    })
+      title: 'No Data',
+      description: 'No data available to export',
+      variant: 'destructive'
+    });
+    return;
   }
+
+  // Prepare data rows
+  const data = filteredEntries.map((entry) => ({
+    Year: entry.year,
+    'Owner Name': entry.ownerName,
+    'Owned Area': formatArea(entry),
+    'Survey Number': entry.surveyNumber,
+    'Survey Number Type': entry.surveyNumberType,
+    'Nondh Number': entry.nondhNumber,
+    'Created Date': new Date(entry.createdAt).toLocaleDateString(),
+    District: entry.district,
+    Taluka: entry.taluka,
+    Village: entry.village
+  }));
+
+  // Create worksheet from data
+  const worksheet = XLSX.utils.json_to_sheet(data);
+
+  // Define column widths (except Year which stays default)
+  const columnWidths = [
+    { wch: 8 },  // Year - default/narrow
+    { wch: 25 }, // Owner Name - wider for Gujarati text
+    { wch: 20 }, // Owned Area
+    { wch: 18 }, // Survey Number
+    { wch: 20 }, // Survey Number Type
+    { wch: 15 }, // Nondh Number
+    { wch: 15 }, // Created Date
+    { wch: 20 }, // District
+    { wch: 20 }, // Taluka
+    { wch: 20 }  // Village
+  ];
+  worksheet['!cols'] = columnWidths;
+
+  // Style for headers - bold and center aligned
+  const headerStyle = {
+    font: { bold: true, sz: 11 },
+    alignment: { horizontal: 'center', vertical: 'center' },
+    fill: { fgColor: { rgb: 'E0E0E0' } }
+  };
+
+  // Apply header styles (Row 1)
+  const headers = ['Year', 'Owner Name', 'Owned Area', 'Survey Number', 'Survey Number Type', 'Nondh Number', 'Created Date', 'District', 'Taluka', 'Village'];
+  headers.forEach((header, index) => {
+    const cellAddress = XLSX.utils.encode_cell({ r: 0, c: index });
+    if (worksheet[cellAddress]) {
+      worksheet[cellAddress].s = headerStyle;
+    }
+  });
+
+  // Apply center alignment to Year column (Column A) for all data rows
+  const range = XLSX.utils.decode_range(worksheet['!ref']);
+  for (let row = 1; row <= range.e.r; row++) {
+    const yearCell = XLSX.utils.encode_cell({ r: row, c: 0 });
+    if (worksheet[yearCell]) {
+      worksheet[yearCell].s = {
+        alignment: { horizontal: 'center', vertical: 'center' }
+      };
+    }
+  }
+
+  // Create workbook
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, worksheet, 'Passbook Ledger');
+
+  // Generate file name with date in dd-mm-yyyy format
+  const today = new Date();
+  const day = String(today.getDate()).padStart(2, '0');
+  const month = String(today.getMonth() + 1).padStart(2, '0');
+  const year = today.getFullYear();
+  const fileName = `passbook-ledger-${day}-${month}-${year}.xlsx`;
+
+  // Write file
+  XLSX.writeFile(workbook, fileName);
+
+  toast({
+    title: 'Success',
+    description: 'Passbook ledger exported successfully',
+  });
+};
 
   const clearFilters = () => {
     setSearchTerm("")
@@ -311,21 +357,21 @@ export default function PassbookLedger() {
         <div className="flex flex-col sm:flex-row gap-2">
           <Button 
             variant="outline" 
-            onClick={handleExport}
+            onClick={() => handleExportToExcel(filteredEntries, formatArea, toast)}
             disabled={filteredEntries.length === 0}
             className="w-full sm:w-auto"
           >
             <Download className="h-4 w-4 mr-2" />
-            Export CSV
+            Export Ledger
           </Button>
-          <Button 
+          {/* <Button 
             onClick={handlePrint}
             disabled={filteredEntries.length === 0}
             className="w-full sm:w-auto"
           >
             <Print className="h-4 w-4 mr-2" />
             Print Ledger
-          </Button>
+          </Button> */}
         </div>
       </div>
 

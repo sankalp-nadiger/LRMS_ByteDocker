@@ -8,9 +8,10 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Trash2, Plus, ArrowRight, ArrowLeft, Upload, Loader2 } from "lucide-react"
 import { useLandRecord, type Nondh } from "@/contexts/land-record-context"
-import { supabase, uploadFile } from "@/lib/supabase"
+import { createActivityLog, supabase, uploadFile } from "@/lib/supabase"
 import { useToast } from "@/hooks/use-toast"
 import { useStepFormData } from "@/hooks/use-step-form-data"
+import { useUser } from "@clerk/nextjs"
 
 type SNoTypeUI = "block_no" | "re_survey_no" | "survey_no";
 
@@ -20,6 +21,7 @@ export default function NondhAdd() {
   const { toast } = useToast()
   const { getStepData, updateStepData, markAsSaved } = useStepFormData(4) // Step 4 for NondhAdd
   const [loading, setLoading] = useState(false)
+   const { user } = useUser();
   const [uploadingFiles, setUploadingFiles] = useState<Set<string>>(new Set())
  const [nondhData, setNondhData] = useState<Nondh[]>([
   {
@@ -355,6 +357,13 @@ const getAllSNos = () => {
     
     // Mark this step as saved
     markAsSaved()
+    await createActivityLog({
+      user_email: user?.primaryEmailAddress?.emailAddress || "",
+      land_record_id: landBasicInfo.id,
+      step: currentStep,
+      chat_id: null,
+      description: `Added nondhs: ${validNondhs.length} nondhs configured`
+    });
     
     toast({ title: "Nondh data saved successfully" })
     setCurrentStep(5)

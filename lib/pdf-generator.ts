@@ -21,7 +21,7 @@ export class IntegratedDocumentGenerator {
       console.log('Collected documents:', documents.length)
       
       if (documents.length === 0) {
-        throw new Error('No documents found to integrate')
+        throw new Error('No documents found. Please upload documents and try again.')
       }
 
       // Create new PDF document

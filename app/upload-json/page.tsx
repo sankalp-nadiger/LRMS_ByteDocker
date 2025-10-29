@@ -1,5 +1,5 @@
 "use client"
-import React, { useState } from 'react';
+import React, { useState, Suspense } from 'react';
 import { Upload, Download, AlertCircle, CheckCircle, FileJson, Loader2 } from 'lucide-react';
 import { LandRecordService } from '@/lib/supabase';
 import { AuthProvider } from '@/components/auth-provider';
@@ -130,17 +130,17 @@ const convertToSquareMeters = (value, unit) => {
   }
 };
 
-const LandRecordJSONUpload = () => {
+const LandRecordJSONUploadContent = () => {
   const [file, setFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<UploadResult>(null);
   const [errors, setErrors] = useState<string[]>([]);
   const searchParams = useSearchParams()
-const router = useRouter()
-const fromEdit = searchParams.get('fromEdit') === 'true'
-const fromView = searchParams.get('fromView') === 'true'
-const existingLandRecordId = searchParams.get('landRecordId')
-const [duplicateRecord, setDuplicateRecord] = useState<any>(null)
+  const router = useRouter()
+  const fromEdit = searchParams.get('fromEdit') === 'true'
+  const fromView = searchParams.get('fromView') === 'true'
+  const existingLandRecordId = searchParams.get('landRecordId')
+  const [duplicateRecord, setDuplicateRecord] = useState<any>(null)
   const [showDuplicateDialog, setShowDuplicateDialog] = useState(false)
 
   const sampleJSON = {
@@ -465,12 +465,6 @@ const [duplicateRecord, setDuplicateRecord] = useState<any>(null)
       case "Na Manjoor": return "nullified";
       default: return "valid";
     }
-  };
-
-  const findSlabForYear = (year, yearSlabs) => {
-    return yearSlabs.find(slab => 
-      year >= slab.startYear && year < slab.endYear
-    );
   };
 
 const handleCloseDuplicateDialog = () => {
@@ -1015,7 +1009,6 @@ if (fromView && landRecordId) {
   };
 
   return (
-    <AuthProvider>
     <div className="max-w-6xl mx-auto p-6">
       <div className="bg-white rounded-lg shadow-lg p-6">
         <div className="flex items-center justify-between mb-6">
@@ -1265,6 +1258,24 @@ if (fromView && landRecordId) {
   </div>
 )}
     </div>
+  );
+};
+
+const LandRecordJSONUpload = () => {
+  return (
+    <AuthProvider>
+      <Suspense fallback={
+        <div className="max-w-6xl mx-auto p-6">
+          <div className="bg-white rounded-lg shadow-lg p-6">
+            <div className="flex items-center justify-center gap-3 p-8">
+              <Loader2 className="w-8 h-8 animate-spin" />
+              <span>Loading...</span>
+            </div>
+          </div>
+        </div>
+      }>
+        <LandRecordJSONUploadContent />
+      </Suspense>
     </AuthProvider>
   );
 };
