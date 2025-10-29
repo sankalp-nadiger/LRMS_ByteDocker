@@ -47,7 +47,7 @@ export default function NondhDetails() {
       case 'invalid':
         return 'Radd (રદ)'
       default:
-        return 'Pramaanik'
+        return 'Pramaanik (પ્રમાણિત)'
     }
   }
 

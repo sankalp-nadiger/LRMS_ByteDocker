@@ -7,6 +7,7 @@ interface UserInfo {
   email: string;
   fullName: string | null;
   role: string;
+  secondaryEmails: string[];
 }
 
 export async function GET(req: Request) {
@@ -30,15 +31,24 @@ export async function GET(req: Request) {
       const isAdmin = adminEmail && primaryEmail && adminEmail.toLowerCase() === primaryEmail.toLowerCase();
       const userRoles = (user.publicMetadata as any)?.role || 'No role assigned';
       
+      // Get secondary email addresses (all non-primary emails)
+      const secondaryEmails = user.emailAddresses
+        .filter(emailAddress => 
+          emailAddress.id !== user.primaryEmailAddressId && 
+          emailAddress.emailAddress
+        )
+        .map(emailAddress => emailAddress.emailAddress);
+
       return {
         id: user.id,
         email: primaryEmail || 'No email',
         fullName: user.firstName && user.lastName ? `${user.firstName} ${user.lastName}` : user.firstName || null,
-        role: isAdmin ? 'admin' : userRoles
+        role: isAdmin ? 'admin' : userRoles,
+        secondaryEmails: secondaryEmails
       };
     });
     
-    console.log('[API Users List] Retrieved users:', usersList);
+    console.log('[API Users List] Retrieved users:', usersList.length);
     return NextResponse.json({ users: usersList });
   } catch (error) {
     console.error('[API Users List] Error:', error);
