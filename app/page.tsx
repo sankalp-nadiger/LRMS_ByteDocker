@@ -1,1037 +1,620 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
-import {
-  Card, 
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { Badge } from "@/components/ui/badge";
-import { Plus, Search, Download, Loader2, Filter, X } from "lucide-react";
-import { supabase } from "@/lib/supabase";
-import { LandRecordService } from "@/lib/supabase"
-import Link from "next/link";
-import { useUser } from "@clerk/nextjs";
-import { useToast } from "@/hooks/use-toast"
+import { useState, useEffect } from 'react';
+import { useUser } from '@clerk/nextjs';
+import { CheckCircle2, Circle, MapPin, Calendar, User, AlertCircle, Filter, MessageSquare, ClipboardCheck, FileSearch } from 'lucide-react';
+import { createChat, createActivityLog , supabase } from '@/lib/supabase';
+import { useUserRole } from '@/contexts/user-context';
 
 interface LandRecord {
   id: string;
-  district: string;
-  taluka: string;
   village: string;
+  taluka: string;
+  district: string;
   block_no: string;
-  re_survey_no: string;
-  json_uploaded?: boolean;
+  status: string;
 }
 
-export default function LandMaster() {
-  const { isSignedIn, user } = useUser();
-  const router = useRouter();
-  const { toast } = useToast();
-  const [lands, setLands] = useState<LandRecord[]>([]);
+interface Task {
+  id: string;
+  message: string;
+  from_email: string;
+  created_at: string;
+  step: number | null;
+  land_record_id: string;
+  land_record?: LandRecord;
+}
+
+interface GroupedTasks {
+  [landRecordId: string]: {
+    land_record: LandRecord;
+    tasks: Task[];
+  };
+}
+
+type UserRole = 'reviewer' | 'executioner' | 'manager' | 'admin';
+
+export default function TasksDashboard() {
+  const { user } = useUser();
+  const [groupedTasks, setGroupedTasks] = useState<GroupedTasks>({});
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [searchTerm, setSearchTerm] = useState("");
-  const [districtFilter, setDistrictFilter] = useState("all");
-  const [talukaFilter, setTalukaFilter] = useState("all");
-  const [villageFilter, setVillageFilter] = useState("all");
-  const [showFilters, setShowFilters] = useState(false);
-const [showAddOptions, setShowAddOptions] = useState(false);
-  const [selectedLand, setSelectedLand] = useState<string | null>(null);
-const [showBrokerDialog, setShowBrokerDialog] = useState(false);
-const [brokers, setBrokers] = useState([]);
-const [brokerFormData, setBrokerFormData] = useState({
-  brokerId: '',
-  lastOffer: '',
-  nextUpdate: '',
-  status: 'pending'
-});
-const [linkedBrokers, setLinkedBrokers] = useState([]);
-const [loadingLinkedBrokers, setLoadingLinkedBrokers] = useState(false);
-const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
-const [landToDelete, setLandToDelete] = useState<LandRecord | null>(null);
-const [deleting, setDeleting] = useState(false);
-
-// close dropdown when clicking outside
-useEffect(() => {
-  const handleClickOutside = (event: MouseEvent) => {
-    const target = event.target as HTMLElement;
-    // Only close if clicking outside the dropdown and button
-    if (showAddOptions && !target.closest('.add-land-dropdown-container')) {
-      setShowAddOptions(false);
-    }
-  };
-  
-  document.addEventListener('mousedown', handleClickOutside);
-  return () => document.removeEventListener('mousedown', handleClickOutside);
-}, [showAddOptions]);
-
-  // Fetch land records from Supabase
+  const [completingTask, setCompletingTask] = useState<string | null>(null);
+  const [filterStatus, setFilterStatus] = useState<string>('all');
+  const { role } = useUserRole();
   useEffect(() => {
-    const fetchLandRecords = async () => {
-      try {
-        setLoading(true);
-        setError(null);
-        
-        const { data, error } = await supabase
-          .from('land_records')
-          .select('*')
-          .order('created_at', { ascending: false });
+  if (role) { // Only fetch when role is available
+    fetchUserRoleAndTasks();
+  }
+}, [user, role]);
 
-        if (error) {
-          throw error;
-        }
+ const fetchUserRoleAndTasks = async () => {
+  if (!user?.primaryEmailAddress?.emailAddress || !role) return; // Check role exists
 
-        setLands(data || []);
-      } catch (err) {
-        console.error('Error fetching land records:', err);
-        setError(err instanceof Error ? err.message : 'Failed to fetch land records');
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchLandRecords();
-  }, []);
-
-  useEffect(() => {
-  const fetchBrokers = async () => {
-    const { data, error } = await supabase
-      .from('brokers')
-      .select('id, name')
-      .eq('status', 'active')
-      .order('name');
-    
-    if (!error && data) {
-      setBrokers(data);
+  try {
+    setLoading(true);
+    const userEmail = user.primaryEmailAddress.emailAddress;
+    console.log(`[Fetch Data] User Email: ${userEmail}, Role: ${role}`);
+    // Fetch data based on role - use 'role' directly
+    if (role === 'reviewer') {
+      await fetchReviewerTasks(userEmail);
+    } else if (role === 'executioner') {
+      await fetchExecutionerTasks(userEmail);
+    } else if (role === 'manager' || role === 'admin') {
+      await fetchManagerMessages(userEmail);
     }
-  };
-  
-  fetchBrokers();
-}, []);
-
-  // Get unique values for filters
-  const districts = [
-    "all",
-    ...new Set(lands.map((land) => land.district)),
-  ];
-  const talukas = ["all", ...new Set(lands.map((land) => land.taluka))];
-  const villages = ["all", ...new Set(lands.map((land) => land.village))];
-
-  // Filter lands based on search and filters
-const filteredLands = lands.filter((land) => {
-  const matchesSearch =
-    (land.block_no?.toLowerCase() || '').includes(searchTerm.toLowerCase()) ||
-    (land.re_survey_no?.toLowerCase() || '').includes(searchTerm.toLowerCase()) ||
-    (land.district?.toLowerCase() || '').includes(searchTerm.toLowerCase()) ||
-    (land.taluka?.toLowerCase() || '').includes(searchTerm.toLowerCase()) ||
-    (land.village?.toLowerCase() || '').includes(searchTerm.toLowerCase());
-
-  const matchesDistrict =
-    districtFilter === "all" || land.district === districtFilter;
-  const matchesTaluka =
-    talukaFilter === "all" || land.taluka === talukaFilter;
-  const matchesVillage =
-    villageFilter === "all" || land.village === villageFilter;
-
-  return matchesSearch && matchesDistrict && matchesTaluka && matchesVillage;
-});
-
-  const handleAddOptionSelect = (option: string) => {
-  setShowAddOptions(false);
-  if (option === 'manual') {
-    router.push("/land-master/forms");
-  } else if (option === 'json') {
-    router.push("/upload-json");
+  } catch (error) {
+    console.error('Error fetching data:', error);
+  } finally {
+    setLoading(false);
   }
 };
 
-  const handleRefresh = async () => {
-    setLoading(true);
+  const fetchReviewerTasks = async (userEmail: string) => {
     try {
-      const { data, error } = await supabase
+      // Fetch all land records with status 'review'
+      const { data: landRecords, error: landError } = await supabase
         .from('land_records')
+        .select('id, village, taluka, district, block_no, status, reviewed_by')
+        .eq('status', 'review')
+        .order('updated_at', { ascending: false });
+
+      if (landError) throw landError;
+
+      // Filter out land records already reviewed by this user
+      const pendingReviews = (landRecords || []).filter(land => {
+        const reviewedBy = land.reviewed_by || [];
+        return !reviewedBy.includes(userEmail);
+      });
+      console.log('Pending Reviews:', pendingReviews);
+      // Fetch comments (messages) for these land records
+      const landIds = pendingReviews.map(lr => lr.id);
+      const { data: comments, error: commentsError } = await supabase
+        .from('chats')
         .select('*')
+        .in('land_record_id', landIds)
+        .order('created_at', { ascending: false });
+
+      if (commentsError) throw commentsError;
+
+      // Group by land record
+      const grouped: GroupedTasks = {};
+      pendingReviews.forEach(land => {
+        const landComments = (comments || []).filter(c => c.land_record_id === land.id);
+        grouped[land.id] = {
+          land_record: land,
+          tasks: landComments.map(c => ({
+            id: c.id,
+            message: c.message,
+            from_email: c.from_email,
+            created_at: c.created_at,
+            step: c.step,
+            land_record_id: c.land_record_id,
+            land_record: land
+          }))
+        };
+      });
+      console.log('Grouped Reviewer Tasks:', grouped);
+      setGroupedTasks(grouped);
+    } catch (error) {
+      console.error('Error fetching reviewer tasks:', error);
+    }
+  };
+
+  const fetchExecutionerTasks = async (userEmail: string) => {
+    try {
+      // Fetch chats where user is in to_email but NOT in tasks_completed
+      const { data: chats, error } = await supabase
+        .from('chats')
+        .select('*')
+        .contains('to_email', [userEmail])
         .order('created_at', { ascending: false });
 
       if (error) throw error;
-      setLands(data || []);
-      setError(null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to refresh data');
-    } finally {
-      setLoading(false);
-    }
-  };
 
-  const handleLinkBroker = async (landId: string) => {
-    if (!isSignedIn) {
-      alert("Please sign in to link brokers");
-      return;
-    }
-
-  setSelectedLand(landId);
-  setShowBrokerDialog(true);
-  setLoadingLinkedBrokers(true);
-  
-  try {
-    const { data, error } = await supabase
-      .from('broker_land_records')
-      .select(`
-        id,
-        last_offer,
-        status,
-        brokers (
-          id,
-          name
-        )
-      `)
-      .eq('land_record_id', landId);
-
-    if (error) throw error;
-    setLinkedBrokers(data || []);
-  } catch (err) {
-    console.error('Error fetching linked brokers:', err);
-  } finally {
-    setLoadingLinkedBrokers(false);
-  }
-};
-
-const handleSubmitBrokerLink = async () => {
-  if (!isSignedIn) {
-      alert("Please sign in to link brokers");
-      return;
-    }
-    
-  try {
-    const { error } = await supabase
-      .from('broker_land_records')
-      .insert({
-        broker_id: brokerFormData.brokerId,
-        land_record_id: selectedLand,
-        last_offer: brokerFormData.lastOffer ? parseFloat(brokerFormData.lastOffer) : null,
-        next_update: brokerFormData.nextUpdate || null,
-        status: brokerFormData.status
+      // Filter out tasks where user has already marked as completed
+      const pendingTasks = (chats || []).filter(chat => {
+        const tasksCompleted = chat.tasks_completed || [];
+        return !tasksCompleted.includes(userEmail);
       });
 
-    if (error) throw error;
-    
-    setShowBrokerDialog(false);
-    setBrokerFormData({ brokerId: '', lastOffer: '', nextUpdate: '', status: 'pending' });
-    // Show success message
-  } catch (err) {
-    console.error('Error linking broker:', err);
-  }
-};
+      // Fetch land record details
+      const landRecordIds = [...new Set(pendingTasks.map(t => t.land_record_id))];
+      const { data: landRecords, error: landError } = await supabase
+        .from('land_records')
+        .select('id, village, taluka, district, block_no, status')
+        .in('id', landRecordIds);
 
-  const clearFilters = () => {
-    setSearchTerm("");
-    setDistrictFilter("all");
-    setTalukaFilter("all");
-    setVillageFilter("all");
-  };
+      if (landError) throw landError;
 
-  const hasActiveFilters = searchTerm || districtFilter !== "all" || talukaFilter !== "all" || villageFilter !== "all";
+      const landRecordMap = new Map(
+        (landRecords || []).map(lr => [lr.id, lr])
+      );
 
-  const handleDeleteClick = (land: LandRecord) => {
-  // Add authentication check
-  if (!isSignedIn) {
-    toast({
-      title: "Authentication Required",
-      description: "Please sign in to delete land records",
-      variant: "destructive",
-    });
-    return;
-  }
-  setLandToDelete(land);
-  setDeleteConfirmOpen(true);
-};
+      // Group tasks by land record
+      const grouped: GroupedTasks = {};
+      pendingTasks.forEach(task => {
+        const landRecord = landRecordMap.get(task.land_record_id);
+        if (!landRecord) return;
 
-const handleConfirmDelete = async () => {
-  if (!landToDelete) return;
-  
-  try {
-    setDeleting(true);
-    const { error } = await LandRecordService.deleteLandRecord(landToDelete.id);
-    
-    if (error) {
-      throw error;
+        if (!grouped[task.land_record_id]) {
+          grouped[task.land_record_id] = {
+            land_record: landRecord,
+            tasks: []
+          };
+        }
+
+        grouped[task.land_record_id].tasks.push({
+          id: task.id,
+          message: task.message,
+          from_email: task.from_email,
+          created_at: task.created_at,
+          step: task.step,
+          land_record_id: task.land_record_id,
+          land_record: landRecord
+        });
+      });
+
+      setGroupedTasks(grouped);
+    } catch (error) {
+      console.error('Error fetching executioner tasks:', error);
     }
-    
-    // Remove the land from local state
-    setLands(lands.filter(land => land.id !== landToDelete.id));
-    setDeleteConfirmOpen(false);
-    setLandToDelete(null);
-    
-    // Show success toast
-    toast({
-      title: "Successfully Deleted",
-      description: `Land record from ${landToDelete.district} district has been deleted.`,
-      variant: "default",
-      className: "bg-green-50 text-green-800 border-green-200",
-    });
-    
-  } catch (err) {
-    console.error('Error deleting land record:', err);
-    setError(err instanceof Error ? err.message : 'Failed to delete land record');
-    
-    // Show error toast
-    toast({
-      title: "Deletion Failed",
-      description: err instanceof Error ? err.message : 'Failed to delete land record',
-      variant: "destructive",
-    });
+  };
+
+  const fetchManagerMessages = async (userEmail: string) => {
+    try {
+      // Fetch all chats where user is in to_email
+      const { data: chats, error } = await supabase
+        .from('chats')
+        .select('*')
+        .contains('to_email', [userEmail])
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+
+       // Filter out chats where manager has already read (their email is in read_by)
+      const unreadChats = (chats || []).filter(chat => {
+        const readBy = chat.read_by || [];
+        return !readBy.includes(userEmail);
+      });
+
+      // Fetch land record details
+      const landRecordIds = [...new Set((unreadChats || []).map(t => t.land_record_id))];
+      const { data: landRecords, error: landError } = await supabase
+        .from('land_records')
+        .select('id, village, taluka, district, block_no, status')
+        .in('id', landRecordIds);
+
+      if (landError) throw landError;
+
+      const landRecordMap = new Map(
+        (landRecords || []).map(lr => [lr.id, lr])
+      );
+
+      // Group messages by land record
+      const grouped: GroupedTasks = {};
+      (chats || []).forEach(chat => {
+        const landRecord = landRecordMap.get(chat.land_record_id);
+        if (!landRecord) return;
+
+        if (!grouped[chat.land_record_id]) {
+          grouped[chat.land_record_id] = {
+            land_record: landRecord,
+            tasks: []
+          };
+        }
+
+        grouped[chat.land_record_id].tasks.push({
+          id: chat.id,
+          message: chat.message,
+          from_email: chat.from_email,
+          created_at: chat.created_at,
+          step: chat.step,
+          land_record_id: chat.land_record_id,
+          land_record: landRecord
+        });
+      });
+
+      setGroupedTasks(grouped);
+    } catch (error) {
+      console.error('Error fetching manager messages:', error);
+    }
+  };
+
+  const handleCompleteTask = async (taskId: string, landRecordId?: string) => {
+  if (!user?.primaryEmailAddress?.emailAddress) return;
+
+  try {
+    setCompletingTask(taskId);
+    const userEmail = user.primaryEmailAddress.emailAddress;
+
+    if (role === 'reviewer') {
+      // For reviewer: Mark land record as reviewed and update status
+      if (!landRecordId) return;
+
+      const { data: currentLand, error: fetchError } = await supabase
+        .from('land_records')
+        .select('reviewed_by')
+        .eq('id', landRecordId)
+        .single();
+
+      if (fetchError) throw fetchError;
+
+      const reviewedBy = currentLand?.reviewed_by || [];
+
+      const { error: updateError } = await supabase
+        .from('land_records')
+        .update({
+          status: 'query',
+          reviewed_by: [...reviewedBy, userEmail],
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', landRecordId);
+
+      if (updateError) throw updateError;
+
+      // Create activity log for review completion
+      await createActivityLog({
+        user_email: userEmail,
+        land_record_id: landRecordId,
+        step: null,
+        chat_id: null,
+        description: `Review completed by ${userEmail}. Status updated to 'query'.`,
+      });
+    } else if (role === 'executioner') {
+      // For executioner: Mark task as completed
+      const { data: currentChat, error: fetchError } = await supabase
+        .from('chats')
+        .select('tasks_completed, land_record_id, message, step, from_email, to_email')
+        .eq('id', taskId)
+        .single();
+
+      if (fetchError) throw fetchError;
+
+      const tasksCompleted = currentChat?.tasks_completed || [];
+
+      if (!tasksCompleted.includes(userEmail)) {
+        const { error: updateError } = await supabase
+          .from('chats')
+          .update({
+            tasks_completed: [...tasksCompleted, userEmail],
+          })
+          .eq('id', taskId);
+
+        if (updateError) throw updateError;
+
+        // ✅ Create activity log for task completion
+        await createActivityLog({
+          user_email: userEmail,
+          land_record_id: currentChat.land_record_id,
+          step: currentChat.step || null,
+          chat_id: taskId,
+          description: `Task completed by ${userEmail}. Task: "${currentChat.message}"`,
+        });
+
+        // ✅ Create reversed chat (executioner reply)
+        await createChat({
+          from_email: currentChat.to_email,     // invert
+          to_email: currentChat.from_email,     // invert
+          message: currentChat.message,         // same description/message
+          land_record_id: currentChat.land_record_id,
+          step: currentChat.step,
+        });
+      }
+    }
+
+    // Refresh data after completion
+    await fetchUserRoleAndTasks();
+  } catch (error) {
+    console.error('Error completing task:', error);
+    alert('Failed to mark as complete. Please try again.');
   } finally {
-    setDeleting(false);
+    setCompletingTask(null);
   }
 };
 
-const handleCancelDelete = () => {
-  setDeleteConfirmOpen(false);
-  setLandToDelete(null);
-};
+  const filteredGroupedTasks = Object.entries(groupedTasks).reduce((acc, [landId, data]) => {
+    if (filterStatus === 'all' || data.land_record.status === filterStatus) {
+      acc[landId] = data;
+    }
+    return acc;
+  }, {} as GroupedTasks);
 
-  // Export to CSV function
-  const exportToCSV = () => {
-    if (filteredLands.length === 0) return;
-    
-    // Create CSV header
-    const headers = ["District", "Taluka", "Village", "Block No", "Re-Survey No", "Created At"];
-    
-    // Create CSV rows
-    const rows = filteredLands.map(land => [
-      land.district,
-      land.taluka,
-      land.village,
-      land.block_no,
-      land.re_survey_no,
-      new Date(land.created_at).toLocaleDateString()
-    ]);
-    
-    // Combine header and rows
-    const csvContent = [headers, ...rows]
-      .map(row => row.map(field => `"${field}"`).join(","))
-      .join("\n");
-    
-    // Create download link
-    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.setAttribute("href", url);
-    link.setAttribute("download", `land-records-${new Date().toISOString().split('T')[0]}.csv`);
-    link.style.visibility = "hidden";
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+  const totalCount = Object.values(groupedTasks).length;
+
+  const uniqueStatuses = [...new Set(
+    Object.values(groupedTasks).map(g => g.land_record.status)
+  )];
+
+  const getHeaderConfig = () => {
+    switch (role) {
+      case 'reviewer':
+        return {
+          title: 'Reviews Pending',
+          subtitle: 'Land records awaiting your review',
+          icon: FileSearch,
+          color: 'from-purple-600 to-pink-600'
+        };
+      case 'executioner':
+        return {
+          title: 'Action Items',
+          subtitle: 'Tasks assigned to you',
+          icon: ClipboardCheck,
+          color: 'from-blue-600 to-purple-600'
+        };
+      default:
+        return {
+          title: 'Messages',
+          subtitle: 'Communications and updates',
+          icon: MessageSquare,
+          color: 'from-green-600 to-blue-600'
+        };
+    }
   };
 
-  if (error) {
+  const headerConfig = getHeaderConfig();
+
+  if (loading) {
     return (
-      <div className="space-y-4 p-4 sm:p-6">
-        <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4">
-          <div>
-            <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Land Master</h1>
-            <p className="text-muted-foreground text-sm sm:text-base">
-              Manage all land records across districts
-            </p>
-          </div>
-
-<div className="relative add-land-dropdown-container">
-  <Button onClick={() => setShowAddOptions(!showAddOptions)} className="w-full sm:w-auto">
-    <Plus className="h-4 w-4 mr-2" />
-    Add New Land
-  </Button>
-  
-  {showAddOptions && (
-  <div 
-    className="absolute top-full left-0 mt-1 w-full sm:w-48 bg-white border rounded-md shadow-lg z-10"
-    onClick={(e) => e.stopPropagation()} // Add this line
-  >
-    <button
-      onClick={() => handleAddOptionSelect('manual')}
-      className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100"
-    >
-      Add Manually
-    </button>
-    <button
-      onClick={() => handleAddOptionSelect('json')}
-      className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100"
-    >
-      Upload via JSON
-    </button>
-  </div>
-)}
-</div>
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <p className="text-gray-600">Loading your {role === 'reviewer' ? 'reviews' : role === 'executioner' ? 'tasks' : 'messages'}...</p>
         </div>
-
-        <Card>
-          <CardContent className="flex flex-col items-center justify-center py-12">
-            <div className="text-center space-y-4">
-              <p className="text-red-600 text-sm sm:text-base">Error loading land records: {error}</p>
-              <Button onClick={handleRefresh} variant="outline">
-                Try Again
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
       </div>
     );
   }
 
   return (
-    <div className="space-y-4 p-4 sm:p-6">
-      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4">
-        <div>
-          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Land Master</h1>
-          <p className="text-muted-foreground text-sm sm:text-base">
-            Manage all land records across districts
-          </p>
-        </div>
-        <div className="flex flex-col sm:flex-row gap-2">
-          <Button onClick={handleRefresh} variant="outline" disabled={loading} className="w-full sm:w-auto">
-            {loading && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-            Refresh
-          </Button>
-          <div className="relative add-land-dropdown-container">
-  <Button onClick={() => setShowAddOptions(!showAddOptions)} className="w-full sm:w-auto">
-    <Plus className="h-4 w-4 mr-2" />
-    Add New Land
-  </Button>
-  
-  {showAddOptions && (
-  <div 
-    className="absolute top-full left-0 mt-1 w-full sm:w-48 bg-white border rounded-md shadow-lg z-10"
-    onClick={(e) => e.stopPropagation()}
-  >
-    <button
-      onClick={() => handleAddOptionSelect('manual')}
-      className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100"
-    >
-      Add Manually
-    </button>
-    <button
-      onClick={() => handleAddOptionSelect('json')}
-      className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100"
-    >
-      Upload via JSON
-    </button>
-  </div>
-)}
-</div>
-        </div>
-      </div>
-
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-lg sm:text-xl">Land Records</CardTitle>
-          <CardDescription className="text-sm">
-            View and manage all registered land records
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {/* Mobile Search and Filter Toggle */}
-          <div className="flex flex-col sm:flex-row gap-2 sm:gap-4">
-            <div className="flex-1">
-              <Label htmlFor="search" className="sr-only sm:not-sr-only">Search</Label>
-              <div className="relative">
-                <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
-                <Input
-                  id="search"
-                  placeholder="Search records..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="pl-8"
-                  disabled={loading}
-                />
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50 p-6">
+      <div className="max-w-7xl mx-auto">
+        {/* Header */}
+        <div className="mb-8">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-4">
+              <div className={`bg-gradient-to-r ${headerConfig.color} p-4 rounded-xl shadow-lg`}>
+                <headerConfig.icon className="h-8 w-8 text-white" />
+              </div>
+              <div>
+                <h1 className="text-4xl font-bold text-gray-900 mb-2">
+                  {headerConfig.title}
+                </h1>
+                <p className="text-gray-600">
+                  {headerConfig.subtitle} • {totalCount} {role === 'reviewer' ? 'pending' : 'items'}
+                </p>
               </div>
             </div>
-            
-            {/* Mobile Filter Toggle */}
-            <div className="flex gap-2 sm:hidden">
-              <Button
-                variant="outline"
-                onClick={() => setShowFilters(!showFilters)}
-                className="flex-1"
-              >
-                <Filter className="h-4 w-4 mr-2" />
-                Filters {hasActiveFilters && <span className="ml-1 bg-primary text-primary-foreground rounded-full px-1.5 py-0.5 text-xs">•</span>}
-              </Button>
-              <Button 
-                variant="outline" 
-                disabled={loading || filteredLands.length === 0} 
-                size="sm"
-                onClick={exportToCSV}
-              >
-                <Download className="h-4 w-4" />
-              </Button>
+            <div className="flex items-center gap-3">
+              <div className="bg-white px-6 py-3 rounded-lg shadow-sm border border-gray-200">
+                <div className="text-3xl font-bold text-blue-600">{totalCount}</div>
+                <div className="text-xs text-gray-600 uppercase tracking-wide">
+                  {role === 'reviewer' ? 'Reviews' : role === 'executioner' ? 'Tasks' : 'Threads'}
+                </div>
+              </div>
             </div>
           </div>
 
-          {/* Desktop Filters - Always Visible */}
-          <div className="hidden sm:flex flex-wrap gap-4">
-            <div className="min-w-[150px] flex-1">
-              <Label>District</Label>
-              <Select 
-                value={districtFilter} 
-                onValueChange={setDistrictFilter}
-                disabled={loading}
+          {/* Filter Bar */}
+          {uniqueStatuses.length > 1 && (
+            <div className="flex items-center gap-3 bg-white p-4 rounded-lg shadow-sm border border-gray-200">
+              <Filter className="h-5 w-5 text-gray-500" />
+              <span className="text-sm font-medium text-gray-700">Filter by status:</span>
+              <button
+                onClick={() => setFilterStatus('all')}
+                className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                  filterStatus === 'all'
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                }`}
               >
-                <SelectTrigger>
-                  <SelectValue placeholder="All Districts" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Districts</SelectItem>
-                  {districts.slice(1).map((district) => (
-                    <SelectItem key={district} value={district}>
-                      {district}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="min-w-[150px] flex-1">
-              <Label>Taluka</Label>
-              <Select 
-                value={talukaFilter} 
-                onValueChange={setTalukaFilter}
-                disabled={loading}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="All Talukas" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Talukas</SelectItem>
-                  {talukas.slice(1).map((taluka) => (
-                    <SelectItem key={taluka} value={taluka}>
-                      {taluka}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="min-w-[150px] flex-1">
-              <Label>Village</Label>
-              <Select 
-                value={villageFilter} 
-                onValueChange={setVillageFilter}
-                disabled={loading}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="All Villages" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Villages</SelectItem>
-                  {villages.slice(1).map((village) => (
-                    <SelectItem key={village} value={village}>
-                      {village}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="flex items-end gap-2">
-              {hasActiveFilters && (
-                <Button variant="ghost" onClick={clearFilters} size="sm">
-                  <X className="h-4 w-4 mr-1" />
-                  Clear
-                </Button>
-              )}
-              <Button 
-                variant="outline" 
-                disabled={loading || filteredLands.length === 0}
-                onClick={exportToCSV}
-              >
-                <Download className="h-4 w-4 mr-2" />
-                Export
-              </Button>
-            </div>
-          </div>
-
-          {/* Mobile Filters - Collapsible */}
-          {showFilters && (
-            <div className="sm:hidden space-y-4 p-4 bg-muted/50 rounded-lg">
-              <div className="flex justify-between items-center">
-                <h3 className="font-medium">Filters</h3>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setShowFilters(false)}
-                >
-                  <X className="h-4 w-4" />
-                </Button>
-              </div>
-              
-              <div className="space-y-3">
-                <div>
-                  <Label>District</Label>
-                  <Select 
-                    value={districtFilter} 
-                    onValueChange={setDistrictFilter}
-                    disabled={loading}
+                All ({totalCount})
+              </button>
+              {uniqueStatuses.map(status => {
+                const count = Object.values(groupedTasks).filter(
+                  g => g.land_record.status === status
+                ).length;
+                return (
+                  <button
+                    key={status}
+                    onClick={() => setFilterStatus(status)}
+                    className={`px-4 py-2 rounded-lg text-sm font-medium capitalize transition-colors ${
+                      filterStatus === status
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                    }`}
                   >
-                    <SelectTrigger>
-                      <SelectValue placeholder="All Districts" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Districts</SelectItem>
-                      {districts.slice(1).map((district) => (
-                        <SelectItem key={district} value={district}>
-                          {district}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div>
-                  <Label>Taluka</Label>
-                  <Select 
-                    value={talukaFilter} 
-                    onValueChange={setTalukaFilter}
-                    disabled={loading}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="All Talukas" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Talukas</SelectItem>
-                      {talukas.slice(1).map((taluka) => (
-                        <SelectItem key={taluka} value={taluka}>
-                          {taluka}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div>
-                  <Label>Village</Label>
-                  <Select 
-                    value={villageFilter} 
-                    onValueChange={setVillageFilter}
-                    disabled={loading}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="All Villages" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Villages</SelectItem>
-                      {villages.slice(1).map((village) => (
-                        <SelectItem key={village} value={village}>
-                          {village}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                {hasActiveFilters && (
-                  <Button variant="outline" onClick={clearFilters} className="w-full">
-                    <X className="h-4 w-4 mr-2" />
-                    Clear All Filters
-                  </Button>
-                )}
-              </div>
+                    {status} ({count})
+                  </button>
+                );
+              })}
             </div>
           )}
+        </div>
 
-          {/* Desktop Table */}
-          <div className="hidden lg:block rounded-md border">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>District</TableHead>
-                  <TableHead>Taluka</TableHead>
-                  <TableHead>Village</TableHead>
-                  <TableHead>Block No</TableHead>
-                  <TableHead>Re-Survey No</TableHead>
-                  <TableHead>Actions</TableHead> 
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {loading ? (
-                  <TableRow>
-                    <TableCell colSpan={7} className="text-center py-12">
-                      <div className="flex items-center justify-center space-x-2">
-                        <Loader2 className="h-6 w-6 animate-spin" />
-                        <span className="text-muted-foreground">
-                          Loading land records...
-                        </span>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ) : filteredLands.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={7} className="text-center py-8">
-                      <div className="text-muted-foreground">
-                        {lands.length === 0
-                          ? "No land records found. Add your first land record to get started."
-                          : "No records match your search criteria."}
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ) : (
-                  filteredLands.map((land) => (
-                    <TableRow key={land.id}>
-                      <TableCell className="font-medium">
-  <div className="flex items-center gap-2">
-    {land.district}
-    {land.json_uploaded && (
-      <Badge variant="outline" className="text-xs">JSON Upload</Badge>
-    )}
-  </div>
-</TableCell>
-                      <TableCell>{land.taluka}</TableCell>
-                      <TableCell>{land.village}</TableCell>
-                      <TableCell>{land.block_no}</TableCell>
-                      <TableCell>{land.re_survey_no}</TableCell>
-                      <TableCell>
-  <div className="flex gap-2">
-    <Link href={`/land-master/forms?mode=view&id=${land.id}`}>
-      <Button variant="ghost" size="sm">View</Button>
-    </Link>
-    <Link href={`/land-master/forms?mode=edit&id=${land.id}`}>
-      <Button variant="ghost" size="sm">Edit</Button>
-    </Link>
-    <Button 
-      variant="ghost" 
-      size="sm"
-      onClick={() => handleLinkBroker(land.id)}
-    >
-      Link Broker
-    </Button>
-    <Button 
-      variant="ghost" 
-      size="sm"
-      onClick={() => handleDeleteClick(land)}
-      className="text-red-600 hover:text-red-800 hover:bg-red-50"
-    >
-      Delete
-    </Button>
-  </div>
-</TableCell>
-                    </TableRow>
-                  ))
-                )}
-              </TableBody>
-            </Table>
+        {/* Content Grid */}
+        {Object.keys(filteredGroupedTasks).length === 0 ? (
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-16 text-center">
+            <CheckCircle2 className="h-20 w-20 mx-auto mb-4 text-green-500" />
+            <h2 className="text-2xl font-bold text-gray-900 mb-2">All Caught Up! 🎉</h2>
+            <p className="text-gray-600">
+              {role === 'reviewer'
+                ? 'No reviews pending at the moment.'
+                : role === 'executioner'
+                ? 'You have no pending tasks.'
+                : 'No new messages.'}
+            </p>
           </div>
-
-          {/* Mobile/Tablet Card Layout */}
-          <div className="lg:hidden space-y-3">
-            {loading ? (
-              <div className="flex items-center justify-center py-12">
-                <div className="flex items-center space-x-2">
-                  <Loader2 className="h-6 w-6 animate-spin" />
-                  <span className="text-muted-foreground">Loading land records...</span>
-                </div>
-              </div>
-            ) : filteredLands.length === 0 ? (
-              <div className="text-center py-8">
-                <div className="text-muted-foreground text-sm">
-                  {lands.length === 0
-                    ? "No land records found. Add your first land record to get started."
-                    : "No records match your search criteria."}
-                </div>
-              </div>
-            ) : (
-              filteredLands.map((land) => (
-                <Card key={land.id} className="p-4">
-                  <div className="space-y-3">
-                    <div className="flex justify-between items-start">
-  <div className="space-y-1">
-    <div className="font-medium text-sm flex items-center gap-2">
-      {land.district}
-      {land.json_uploaded && (
-        <Badge variant="outline" className="text-xs">JSON</Badge>
-      )}
-    </div>
-    <div className="text-muted-foreground text-xs">
-      {land.taluka} • {land.village}
-    </div>
-  </div>
-  <Badge variant="secondary" className="text-xs">Active</Badge>
-</div>
-                    
-                    <div className="grid grid-cols-2 gap-2 text-sm">
-                      <div>
-                        <span className="text-muted-foreground">Block No:</span>
-                        <div className="font-medium">{land.block_no}</div>
+        ) : (
+          <div className="space-y-6">
+            {Object.entries(filteredGroupedTasks).map(([landRecordId, group]) => (
+              <div
+                key={landRecordId}
+                className="bg-white rounded-2xl shadow-md border border-gray-200 overflow-hidden hover:shadow-xl transition-shadow duration-300"
+              >
+                {/* Land Record Header */}
+                <div className={`bg-gradient-to-r ${headerConfig.color} text-white p-6`}>
+                  <div className="flex items-start justify-between">
+                    <div className="flex items-start gap-3 flex-1">
+                      <div className="bg-white/20 p-3 rounded-lg backdrop-blur-sm">
+                        <MapPin className="h-6 w-6" />
                       </div>
-                      <div>
-                        <span className="text-muted-foreground">Re-Survey No:</span>
-                        <div className="font-medium">{land.re_survey_no}</div>
-                      </div>
-                    </div>
-                    
-                    <div className="flex gap-2 pt-2">
-  <Link href={`/land-master/forms?mode=view&id=${land.id}`} className="flex-1">
-    <Button variant="outline" size="sm" className="w-full">View</Button>
-  </Link>
-  <Link href={`/land-master/forms?mode=edit&id=${land.id}`} className="flex-1">
-    <Button variant="outline" size="sm" className="w-full">Edit</Button>
-  </Link>
-  <Button 
-    variant="outline" 
-    size="sm" 
-    className="flex-1"
-    onClick={() => handleLinkBroker(land.id)}
-  >
-    Link Broker
-  </Button>
-  <Button 
-    variant="outline" 
-    size="sm" 
-    className="flex-1 text-red-600 border-red-200 hover:bg-red-50 hover:text-red-700"
-    onClick={() => handleDeleteClick(land)}
-  >
-    Delete
-  </Button>
-</div>
-                  </div>
-                </Card>
-              ))
-            )}
-          </div>
-
-          {/* Results Summary and Pagination */}
-          {!loading && filteredLands.length > 0 && (
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pt-4 border-t">
-              <p className="text-xs sm:text-sm text-muted-foreground text-center sm:text-left">
-                Showing {filteredLands.length} of {lands.length} records
-              </p>
-              <div className="flex gap-2 justify-center sm:justify-end">
-                <Button variant="outline" size="sm" disabled>
-                  Previous
-                </Button>
-                <Button variant="outline" size="sm" disabled>
-                  Next
-                </Button>
-              </div>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-      {showBrokerDialog && (
-  <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-    <Card className="w-full max-w-4xl max-h-[90vh] overflow-hidden">
-      <div className="overflow-y-auto max-h-[90vh]">
-        <CardHeader>
-          <CardTitle>Link Broker</CardTitle>
-          <CardDescription>Associate a broker with this land record</CardDescription>
-        </CardHeader>
-      <CardContent>
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Left Side - Add New Broker Link */}
-          <div className="space-y-4">
-            <h3 className="font-semibold text-sm">Add New Broker</h3>
-            
-            <div>
-              <Label>Select Broker</Label>
-              <Select
-                value={brokerFormData.brokerId}
-                onValueChange={(value) => setBrokerFormData({...brokerFormData, brokerId: value})}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Choose a broker" />
-                </SelectTrigger>
-                <SelectContent>
-                  {brokers.map((broker) => (
-                    <SelectItem key={broker.id} value={broker.id}>
-                      {broker.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <Link href="/brokers/new">
-                <Button variant="link" className="pl-0 text-sm" size="sm">
-                  + Add New Broker
-                </Button>
-              </Link>
-            </div>
-
-            <div>
-              <Label>Last Offer (Optional)</Label>
-              <Input
-                type="number"
-                placeholder="Enter amount"
-                value={brokerFormData.lastOffer}
-                onChange={(e) => setBrokerFormData({...brokerFormData, lastOffer: e.target.value})}
-              />
-            </div>
-
-            <div>
-              <Label>Next Update Date (Optional)</Label>
-              <Input
-                type="date"
-                value={brokerFormData.nextUpdate}
-                onChange={(e) => setBrokerFormData({...brokerFormData, nextUpdate: e.target.value})}
-              />
-            </div>
-
-            <div>
-              <Label>Status</Label>
-              <Select
-                value={brokerFormData.status}
-                onValueChange={(value) => setBrokerFormData({...brokerFormData, status: value})}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="pending">Pending</SelectItem>
-                  <SelectItem value="negotiating">Negotiating</SelectItem>
-                  <SelectItem value="deal_closed">Deal Closed</SelectItem>
-                  <SelectItem value="rejected">Rejected</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="flex gap-2 pt-4">
-              <Button
-                variant="outline"
-                className="flex-1"
-                onClick={() => setShowBrokerDialog(false)}
-              >
-                Cancel
-              </Button>
-              <Button
-                className="flex-1"
-                onClick={handleSubmitBrokerLink}
-                disabled={!brokerFormData.brokerId}
-              >
-                Link Broker
-              </Button>
-            </div>
-          </div>
-
-          {/* Right Side - Linked Brokers */}
-          <div className="space-y-4 border-l pl-6">
-            <h3 className="font-semibold text-sm">Linked Brokers ({linkedBrokers.length})</h3>
-            
-            {loadingLinkedBrokers ? (
-              <div className="flex items-center justify-center py-8">
-                <Loader2 className="h-6 w-6 animate-spin" />
-              </div>
-            ) : linkedBrokers.length === 0 ? (
-              <div className="text-center py-8 text-muted-foreground text-sm">
-                No brokers linked yet
-              </div>
-            ) : (
-              <div className="space-y-3 max-h-[400px] overflow-y-auto">
-                {linkedBrokers.map((link) => (
-                  <Card key={link.id} className="p-3">
-                    <div className="space-y-2">
-                      <div className="flex justify-between items-start">
-                        <div className="font-medium text-sm">{link.brokers.name}</div>
-                        <Badge 
-                          variant={
-                            link.status === 'deal_closed' ? 'default' :
-                            link.status === 'negotiating' ? 'secondary' :
-                            link.status === 'rejected' ? 'destructive' : 'outline'
-                          }
-                          className="text-xs"
-                        >
-                          {link.status.replace('_', ' ')}
-                        </Badge>
-                      </div>
-                      
-                      {link.last_offer && (
-                        <div className="text-sm">
-                          <span className="text-muted-foreground">Last Offer:</span>
-                          <span className="ml-2 font-medium">₹{link.last_offer.toLocaleString()}</span>
+                      <div className="flex-1">
+                        <h2 className="text-2xl font-bold mb-2">
+                          {group.land_record.village}, {group.land_record.taluka}
+                        </h2>
+                        <div className="flex flex-wrap gap-3 text-sm">
+                          <span className="bg-white/20 px-3 py-1 rounded-full backdrop-blur-sm">
+                            Block: {group.land_record.block_no}
+                          </span>
+                          <span className="bg-white/20 px-3 py-1 rounded-full backdrop-blur-sm">
+                            District: {group.land_record.district}
+                          </span>
+                          <span className="bg-white/20 px-3 py-1 rounded-full backdrop-blur-sm capitalize">
+                            Status: {group.land_record.status}
+                          </span>
                         </div>
-                      )}
+                      </div>
                     </div>
-                  </Card>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-      </CardContent>
-    </div>
-    </Card>
-  </div>
-)}
+                    
+                    {/* Reviewer: Complete Review Button */}
+                    {role === 'reviewer' && (
+                      <button
+                        onClick={() => handleCompleteTask(landRecordId, landRecordId)}
+                        disabled={completingTask === landRecordId}
+                        className="ml-4 bg-white text-purple-600 px-6 py-3 rounded-lg font-semibold hover:bg-purple-50 transition-colors disabled:opacity-50 flex items-center gap-2"
+                      >
+                        {completingTask === landRecordId ? (
+                          <>
+                            <div className="animate-spin rounded-full h-5 w-5 border-2 border-purple-600 border-t-transparent" />
+                            Completing...
+                          </>
+                        ) : (
+                          <>
+                            <CheckCircle2 className="h-5 w-5" />
+                            Complete Review
+                          </>
+                        )}
+                      </button>
+                    )}
+                    
+                    {/* Non-reviewer: Show count */}
+                    {role !== 'reviewer' && (
+                      <div className="bg-white/20 px-4 py-2 rounded-full backdrop-blur-sm ml-4">
+                        <span className="font-bold">{group.tasks.length}</span> {role === 'executioner' ? 'task' : 'message'}{group.tasks.length !== 1 ? 's' : ''}
+                      </div>
+                    )}
+                  </div>
+                </div>
 
-{/* Delete Confirmation Dialog */}
-{deleteConfirmOpen && landToDelete && isSignedIn && (
-  <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-    <Card className="w-full max-w-md">
-      <CardHeader>
-        <CardTitle className="text-red-600">Confirm Deletion</CardTitle>
-        <CardDescription>
-          Are you sure you want to delete this land record? This action cannot be undone.
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        <div className="space-y-3">
-          <div className="bg-muted/50 p-3 rounded-md text-sm">
-            <p><strong>District:</strong> {landToDelete.district}</p>
-            <p><strong>Taluka:</strong> {landToDelete.taluka}</p>
-            <p><strong>Village:</strong> {landToDelete.village}</p>
-            <p><strong>Block No:</strong> {landToDelete.block_no}</p>
-            <p><strong>Re-Survey No:</strong> {landToDelete.re_survey_no}</p>
+                {/* Comments/Tasks/Messages List */}
+                <div className="p-6">
+                  {group.tasks.length > 0 ? (
+                    <div className="space-y-4">
+                      <h3 className="text-lg font-semibold text-gray-900 mb-4">
+                        {role === 'reviewer' ? 'Comments' : role === 'executioner' ? 'Tasks' : 'Messages'}
+                      </h3>
+                      {group.tasks.map((task) => (
+                        <div
+                          key={task.id}
+                          className="group relative bg-gradient-to-r from-gray-50 to-white border-2 border-gray-200 rounded-xl p-5 hover:border-blue-300 hover:shadow-md transition-all duration-300"
+                        >
+                          <div className="flex items-start gap-4">
+                            {/* Checkbox (only for executioner) */}
+                            {role === 'executioner' && (
+                              <button
+                                onClick={() => handleCompleteTask(task.id)}
+                                disabled={completingTask === task.id}
+                                className="flex-shrink-0 mt-1 transition-transform hover:scale-110 active:scale-95 disabled:opacity-50"
+                              >
+                                {completingTask === task.id ? (
+                                  <div className="animate-spin rounded-full h-7 w-7 border-2 border-blue-600 border-t-transparent" />
+                                ) : (
+                                  <Circle className="h-7 w-7 text-gray-400 group-hover:text-blue-600 transition-colors" strokeWidth={2.5} />
+                                )}
+                              </button>
+                            )}
+
+                            {/* Message icon for reviewer/manager */}
+                            {role !== 'executioner' && (
+                              <div className="flex-shrink-0 mt-1">
+                                <MessageSquare className="h-6 w-6 text-gray-400" />
+                              </div>
+                            )}
+
+                            {/* Content */}
+                            <div className="flex-1 min-w-0">
+                              {task.step && (
+                                <div className="inline-flex items-center gap-2 mb-2">
+                                  <span className="bg-blue-100 text-blue-700 text-xs font-semibold px-3 py-1 rounded-full">
+                                    Step {task.step}
+                                  </span>
+                                </div>
+                              )}
+
+                              <p className="text-gray-900 font-medium mb-3 leading-relaxed">
+                                {task.message}
+                              </p>
+
+                              <div className="flex flex-wrap gap-4 text-sm text-gray-600">
+                                <div className="flex items-center gap-1.5">
+                                  <User className="h-4 w-4 text-gray-400" />
+                                  <span>From: {task.from_email}</span>
+                                </div>
+                                <div className="flex items-center gap-1.5">
+                                  <Calendar className="h-4 w-4 text-gray-400" />
+                                  <span>{new Date(task.created_at).toLocaleDateString('en-GB', { 
+                                    day: 'numeric', 
+                                    month: 'short', 
+                                    year: 'numeric',
+                                    hour: '2-digit',
+                                    minute: '2-digit'
+                                  })}</span>
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Urgency Indicator (only for executioner tasks) */}
+                            {role === 'executioner' && new Date().getTime() - new Date(task.created_at).getTime() > 7 * 24 * 60 * 60 * 1000 && (
+                              <div className="flex-shrink-0">
+                                <div className="bg-red-100 text-red-700 p-2 rounded-lg" title="Task is over 7 days old">
+                                  <AlertCircle className="h-5 w-5" />
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-center text-gray-500 py-4">
+                      No {role === 'reviewer' ? 'comments' : 'messages'} yet
+                    </p>
+                  )}
+                </div>
+              </div>
+            ))}
           </div>
-          <p className="text-sm text-muted-foreground">
-            This will permanently delete all data associated with this land record, 
-            including year slabs, panipatraks, nondhs, and broker links.
-          </p>
-        </div>
-      </CardContent>
-      <div className="flex gap-2 p-6 pt-0">
-        <Button
-          variant="outline"
-          className="flex-1"
-          onClick={handleCancelDelete}
-          disabled={deleting}
-        >
-          Cancel
-        </Button>
-        <Button
-          variant="destructive"
-          className="flex-1"
-          onClick={handleConfirmDelete}
-          disabled={deleting}
-        >
-          {deleting ? (
-            <>
-              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-              Deleting...
-            </>
-          ) : (
-            'Delete Permanently'
-          )}
-        </Button>
+        )}
       </div>
-    </Card>
-  </div>
-)}
     </div>
   );
 }

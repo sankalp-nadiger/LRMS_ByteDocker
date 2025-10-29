@@ -12,9 +12,10 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Trash2, Plus, Upload, Eye, Loader2, ChevronDown, ChevronUp, Badge} from "lucide-react"
 import { useLandRecord, type NondhDetail } from "@/contexts/land-record-context"
-import { supabase, uploadFile } from "@/lib/supabase"
+import { createActivityLog, supabase, uploadFile } from "@/lib/supabase"
 import { useToast } from "@/hooks/use-toast"
 import { useStepFormData } from "@/hooks/use-step-form-data"
+import { useUser } from '@clerk/nextjs'
 
 const nondhTypes = [
   "Kabjedaar",
@@ -38,9 +39,9 @@ const hukamTypes = ["SSRD", "Collector", "Collector_ganot", "Prant", "Mamlajdaar
 const ganotOptions = ["1st Right", "2nd Right"]
 
 const statusTypes = [
-  { value: "valid", label: "Pramanik" },
-  { value: "invalid", label: "Radd" },
-  { value: "nullified", label: "Na manjoor" }
+  { value: "valid", label: "Pramanik (પ્રમાણિત)" },
+  { value: "invalid", label: "Radd (રદ)" },
+  { value: "nullified", label: "Na manjoor (નામંજૂર)" }
 ]
 
 const GUNTHAS_PER_ACRE = 40;
@@ -532,7 +533,7 @@ const [affectedNondhDetails, setAffectedNondhDetails] = useState<Record<string, 
   status: "valid" | "invalid" | "nullified";
   invalidReason?: string;
 }>>>({});
-
+const { user } = useUser();
 const cleanupTimeoutRef = useRef(null);
 
 useEffect(() => {
@@ -3689,10 +3690,17 @@ if (insertError) throw insertError;
 
     setNondhDetails(updatedDetails);
     markAsSaved();
-    
-    toast({ 
-      title: "Success", 
-      description: `Saved ${validNondhDetails.length} nondh detail(s) with ${ownerRelationsToInsert.length} owner relations successfully` 
+
+    await createActivityLog({
+      user_email: user?.primaryEmailAddress?.emailAddress || "",
+      land_record_id: landBasicInfo.id,
+      step: 5,
+      chat_id: null,
+      description: `Added ${validNondhDetails.length} nondh detail(s) with ${ownerRelationsToInsert.length} owner relations successfully`
+    });
+    toast({
+      title: "Success",
+      description: `Saved ${validNondhDetails.length} nondh detail(s) with ${ownerRelationsToInsert.length} owner relations successfully`
     });
     
     setCurrentStep(6);

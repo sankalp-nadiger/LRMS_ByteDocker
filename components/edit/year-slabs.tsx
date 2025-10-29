@@ -32,6 +32,8 @@ import {
   SlabEntry,
 } from "@/contexts/land-record-context";
 import { useToast } from "@/hooks/use-toast";
+import { useUser } from "@clerk/nextjs"
+import { createActivityLog } from "@/lib/supabase";
 import { convertToSquareMeters, convertFromSquareMeters } from "@/lib/supabase";
 import { Loader2 } from "lucide-react"; // For loading spinner
 import { uploadFile } from "@/lib/supabase"; // For file uploads
@@ -244,6 +246,7 @@ export default function YearSlabs() {
     recordId,
 setHasUnsavedChanges,  } = useLandRecord();
   const { toast } = useToast();
+  const { user } = useUser();
   
   const { 
     getStepData, 
@@ -1167,6 +1170,20 @@ const handleSave = async () => {
     );
 
     if (error) throw error;
+
+    // Update land record status and create activity log
+    await LandRecordService.updateLandRecord(recordId, {
+      status: "drafting",
+      current_step: currentStep
+    });
+
+    await createActivityLog({
+      user_email: user?.primaryEmailAddress?.emailAddress || "",
+      land_record_id: recordId,
+      step: currentStep,
+      chat_id: null,
+      description: `Updated year slabs: ${dbSlabs.length} slabs configured`
+    });
 
     initialSlabsRef.current = JSON.parse(JSON.stringify(slabs));
     setModified(false);

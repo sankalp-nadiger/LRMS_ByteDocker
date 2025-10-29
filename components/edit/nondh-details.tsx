@@ -16,6 +16,8 @@ import { supabase, uploadFile } from "@/lib/supabase"
 import { useToast } from "@/hooks/use-toast"
 import { LandRecordService } from "@/lib/supabase"
 import { useStepFormData } from "@/hooks/use-step-form-data";
+import { useUser } from "@clerk/nextjs";
+import { createActivityLog } from "@/lib/supabase";
 
 const nondhTypes = [
   "Kabjedaar",
@@ -58,9 +60,9 @@ interface AreaFieldsProps {
 }
 
 const statusTypes = [
-  { value: "valid", label: "Pramanik" },
-  { value: "invalid", label: "Radd" },
-  { value: "nullified", label: "Na manjoor" }
+  { value: "valid", label: "Pramanik (પ્રમાણિત)" },
+  { value: "invalid", label: "Radd (રદ)" },
+  { value: "nullified", label: "Na manjoor (નામંજૂર)" }
 ]
 
 const GUNTHAS_PER_ACRE = 40;
@@ -566,6 +568,7 @@ const areaFields = ({ area, onChange, disabled = false, maxValue }: AreaFieldsPr
 export default function NondhDetailsEdit() {
   const { landBasicInfo, yearSlabs, nondhs: contextNondhs, setNondhs, recordId, setCurrentStep } = useLandRecord()
   const { toast } = useToast()
+  const { user } = useUser()
 const { getStepData, updateStepData, markAsSaved, hasUnsavedChanges } = useStepFormData(5)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -2778,6 +2781,21 @@ const recalculateOwnerValidity = () => {
       originalAffectedNondhDetails: JSON.parse(JSON.stringify(refreshedAffectedDetails))
     });
     
+    // Update land record status to "drafting"
+    await LandRecordService.updateLandRecord(recordId, {
+      status: "drafting",
+      current_step: 3  // Nondh details is step 3
+    });
+
+    // Create activity log
+    await createActivityLog({
+      user_email: user?.primaryEmailAddress?.emailAddress || "",
+      land_record_id: recordId,
+      step: 3,
+      chat_id: null,
+      description: `Updated nondh details and owner relations. Details count: ${processedDetails.length}`
+    });
+
     setHasChanges(false);
     
     toast({ title: "Changes saved successfully" });

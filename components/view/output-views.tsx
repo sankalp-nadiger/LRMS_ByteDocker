@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
@@ -8,11 +8,14 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
-import { Download, Eye, Filter, Calendar, AlertTriangle } from "lucide-react"
+import { Download, Eye, Filter, Calendar, AlertTriangle, Send, X, Loader2 } from "lucide-react"
 import { useLandRecord } from "@/contexts/land-record-context"
 import { convertToSquareMeters, LandRecordService } from "@/lib/supabase"
 import { useToast } from "@/hooks/use-toast"
 import { useRouter } from "next/navigation"
+import { useUser } from "@clerk/nextjs"
+import { createActivityLog, createChat } from "@/lib/supabase"
+import { useUserRole } from '@/contexts/user-context'
 
 interface PassbookEntry {
   year: number
@@ -50,10 +53,282 @@ interface Nondh {
   nondh_doc_url?: string
 }
 
+interface User {
+  id: string;
+  email: string;
+  fullName: string;
+  role: string;
+}
+
+// Comment Modal Component
+interface CommentModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+ onSubmit: (message: string, recipients: string[], isReviewComplete?: boolean) => Promise<void>;
+  loading?: boolean;
+  step: number;
+  userRole: string;
+  landRecordStatus?: string;
+}
+
+const CommentModal = ({ isOpen, onClose, onSubmit, loading = false, step, userRole, landRecordStatus }: CommentModalProps) => {
+  const [message, setMessage] = useState('');
+  const [showMentionDropdown, setShowMentionDropdown] = useState(false);
+  const [mentionSearch, setMentionSearch] = useState('');
+  const [selectedRecipients, setSelectedRecipients] = useState<string[]>([]);
+  const [cursorPosition, setCursorPosition] = useState(0);
+  const [users, setUsers] = useState<User[]>([]);
+  const [isReviewComplete, setIsReviewComplete] = useState(false);
+  const { user } = useUser();
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // Determine the modal title based on user role
+  const modalTitle = userRole === 'reviewer' 
+    ? `Send Message to Manager/Executioner - Step ${step}`
+    : `Send Message to Executioner - Step ${step}`;
+
+  // Fetch users when modal opens
+  useEffect(() => {
+    if (isOpen) {
+      const fetchUsers = async () => {
+        try {
+          const response = await fetch('/api/users/list');
+          if (!response.ok) throw new Error('Failed to fetch users');
+          const data = await response.json();
+          setUsers(data.users);
+        } catch (error) {
+          console.error('Error fetching users:', error);
+        }
+      };
+      fetchUsers();
+      // Reset state when modal opens
+      setMessage('');
+      setSelectedRecipients([]);
+      setShowMentionDropdown(false);
+      // Set isReviewComplete based on status
+    if (userRole === 'reviewer') {
+      setIsReviewComplete(landRecordStatus === 'review');
+    } else {
+      setIsReviewComplete(false);
+    }
+    }
+}, [isOpen, landRecordStatus, userRole]); 
+
+  const handleMessageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    const position = e.target.selectionStart || 0;
+    
+    setMessage(value);
+    setCursorPosition(position);
+
+    // Check for @ mention
+    const textBeforeCursor = value.substring(0, position);
+    const lastAtIndex = textBeforeCursor.lastIndexOf('@');
+    
+    if (lastAtIndex !== -1) {
+      const afterAt = textBeforeCursor.substring(lastAtIndex + 1);
+      const beforeAt = textBeforeCursor.substring(0, lastAtIndex);
+      if (beforeAt === '' || beforeAt.endsWith(' ')) {
+        setMentionSearch(afterAt);
+        setShowMentionDropdown(true);
+        return;
+      }
+    }
+    
+    setShowMentionDropdown(false);
+  };
+
+  const handleMentionSelect = (userEmail: string, userName: string) => {
+    const textBeforeCursor = message.substring(0, cursorPosition);
+    const textAfterCursor = message.substring(cursorPosition);
+    const lastAtIndex = textBeforeCursor.lastIndexOf('@');
+    
+    const beforeMention = message.substring(0, lastAtIndex);
+    const newText = beforeMention + `@${userName} ` + textAfterCursor;
+    
+    setMessage(newText);
+    setSelectedRecipients([...selectedRecipients, userEmail]);
+    setShowMentionDropdown(false);
+    setMentionSearch('');
+    
+    setTimeout(() => {
+      inputRef.current?.focus();
+    }, 0);
+  };
+
+  const removeMention = (email: string) => {
+    setSelectedRecipients(selectedRecipients.filter(e => e !== email));
+  };
+
+  const getUserByEmail = (email: string) => {
+    return users.find(u => u.email === email);
+  };
+
+  const filteredUsers = users
+    .filter(u => u.email !== user?.primaryEmailAddress?.emailAddress)
+    .filter(u => !selectedRecipients.includes(u.email))
+    .filter(u => 
+      mentionSearch === '' || 
+      u.fullName.toLowerCase().includes(mentionSearch.toLowerCase()) ||
+      u.email.toLowerCase().includes(mentionSearch.toLowerCase())
+    );
+
+  const handleSubmit = async () => {
+    if (!message.trim()) return;
+    await onSubmit(message, selectedRecipients, isReviewComplete);
+    setMessage('');
+    setSelectedRecipients([]);
+    setIsReviewComplete(false);
+  };
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+      <Card className="w-full max-w-lg max-h-[80vh] overflow-hidden flex flex-col">
+        <CardHeader className="flex-shrink-0 border-b bg-white sticky top-0 z-10">
+          <div className="flex justify-between items-center">
+            <CardTitle>{modalTitle}</CardTitle>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={onClose}
+              disabled={loading}
+            >
+              <X className="w-4 h-4" />
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-4 overflow-y-auto flex-1 p-6 pt-4">
+          {/* Selected Recipients Pills */}
+          {selectedRecipients.length > 0 && (
+            <div className="flex flex-wrap gap-2 mb-2">
+              {selectedRecipients.map(email => {
+                const recipient = getUserByEmail(email);
+                return (
+                  <span key={email} className="inline-flex items-center gap-1 px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-sm">
+                    {recipient?.fullName || email}
+                    <button
+                      onClick={() => removeMention(email)}
+                      className="hover:text-blue-900 text-xs"
+                    >
+                      ×
+                    </button>
+                  </span>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Message Input */}
+          <div className="space-y-2">
+            <Label htmlFor="comment-message">Message</Label>
+            <div className="relative">
+              <input
+                ref={inputRef}
+                id="comment-message"
+                type="text"
+                value={message}
+                onChange={handleMessageChange}
+                placeholder={userRole === 'reviewer' 
+                  ? "Type @ to mention someone or send to all managers/executioners..." 
+                  : "Type @ to mention someone or send to all executioners..."}
+                disabled={loading}
+                onKeyPress={(e) => e.key === 'Enter' && !showMentionDropdown && handleSubmit()}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              />
+
+              {/* Mention Dropdown */}
+              {showMentionDropdown && filteredUsers.length > 0 && (
+                <div className="absolute top-full left-0 mt-1 w-full bg-white border border-gray-300 rounded-lg shadow-lg max-h-48 overflow-y-auto z-20">
+                  {filteredUsers.map(u => (
+                    <button
+                      key={u.id}
+                      onClick={() => handleMentionSelect(u.email, u.fullName)}
+                      className="w-full text-left px-4 py-2 hover:bg-gray-100 flex items-center justify-between border-b border-gray-100 last:border-b-0"
+                    >
+                      <div className="flex flex-col items-start">
+                        <span className="font-medium text-sm">{u.fullName}</span>
+                        <span className="text-xs text-gray-500">{u.email}</span>
+                      </div>
+                      <span className="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded">
+                        {u.role.charAt(0).toUpperCase() + u.role.slice(1)}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            <p className="text-xs text-gray-500">
+              Type @ to mention specific users, or send to all {userRole === 'reviewer' ? 'managers/executioners' : 'executioners'}
+            </p>
+          </div>
+         {userRole === 'reviewer' ? (
+  landRecordStatus === 'review' && ( // ADD THIS CONDITION
+    <div className="flex items-center gap-2 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+      <input
+        type="checkbox"
+        id="review-complete"
+        checked={isReviewComplete}
+        onChange={(e) => setIsReviewComplete(e.target.checked)}
+        className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
+      />
+      <Label htmlFor="review-complete" className="text-sm font-medium cursor-pointer">
+        Mark Review as Complete
+      </Label>
+    </div>
+  )
+) : (userRole === 'manager' || userRole === 'admin' || userRole === 'executioner') && (
+  landRecordStatus !== 'review' && ( // ADD THIS CONDITION
+    <div className="flex items-center gap-2 p-3 bg-green-50 border border-green-200 rounded-lg">
+      <input
+        type="checkbox"
+        id="push-review"
+        checked={isReviewComplete}
+        onChange={(e) => setIsReviewComplete(e.target.checked)}
+        className="w-4 h-4 text-green-600 rounded focus:ring-green-500"
+      />
+      <Label htmlFor="push-review" className="text-sm font-medium cursor-pointer">
+        Push for Review
+      </Label>
+    </div>
+  )
+)}
+          <div className="flex gap-2 pt-4">
+            <Button
+              variant="outline"
+              onClick={onClose}
+              disabled={loading}
+              className="flex-1"
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleSubmit}
+              disabled={loading || !message.trim()}
+              className="flex-1 flex items-center gap-2"
+            >
+              {loading ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <Send className="w-4 h-4" />
+              )}
+              Send Message
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+};
+
 export default function OutputViews() {
-  const { landBasicInfo, recordId, yearSlabs } = useLandRecord()
+  const { landBasicInfo, recordId, yearSlabs, refreshStatus } = useLandRecord()
   const { toast } = useToast()
   const router = useRouter()
+  const { user } = useUser()
+  const { role } = useUserRole()
+  
   const [passbookData, setPassbookData] = useState<PassbookEntry[]>([])
   const [nondhDetails, setNondhDetails] = useState<NondhDetail[]>([])
   const [nondhs, setNondhs] = useState<Nondh[]>([])
@@ -62,7 +337,31 @@ export default function OutputViews() {
   const [dateFilter, setDateFilter] = useState("")
   const [sNoFilter, setSNoFilter] = useState("")
   const [loading, setLoading] = useState(true)
-const [isGeneratingPDF, setIsGeneratingPDF] = useState(false)
+  const [isGeneratingPDF, setIsGeneratingPDF] = useState(false)
+  const [showCommentModal, setShowCommentModal] = useState(false)
+  const [sendingComment, setSendingComment] = useState(false)
+  const [landRecordStatus, setLandRecordStatus] = useState<string>('');
+
+  // Fetch land record status
+useEffect(() => {
+  const fetchLandRecordStatus = async () => {
+    if (!recordId) return;
+    
+    try {
+      const { data, error } = await LandRecordService.getLandRecord(recordId);
+      if (error) throw error;
+      if (data) {
+        setLandRecordStatus(data.status || '');
+      }
+    } catch (error) {
+      console.error('Error fetching land record status:', error);
+    }
+  };
+
+  if (recordId) {
+    fetchLandRecordStatus();
+  }
+}, [recordId]);
 
  // Helper function to format affected S.Nos properly
 const formatAffectedSNos = (affectedSNos: any, availableSNos?: Array<{value: string, type: string, label: string}>): string => {
@@ -126,6 +425,86 @@ const formatAffectedSNos = (affectedSNos: any, availableSNos?: Array<{value: str
   } catch (error) {
     console.warn('Error formatting affected S.Nos:', error);
     return typeof affectedSNos === 'string' ? affectedSNos : JSON.stringify(affectedSNos);
+  }
+};
+
+  // Handle comment submission
+const handleSendComment = async (message: string, recipients: string[], isReviewComplete: boolean = false) => {
+  if (!recordId || !user?.primaryEmailAddress?.emailAddress) return;
+
+  try {
+    setSendingComment(true);
+
+    const toEmails = recipients.length > 0 ? recipients : null;
+
+    const chatData = await createChat({
+      from_email: user.primaryEmailAddress.emailAddress,
+      to_email: toEmails,
+      message: message,
+      land_record_id: recordId,
+      step: 6
+    });
+
+    const recipientText = toEmails 
+      ? `to ${toEmails.length} recipient(s)` 
+      : role === 'reviewer' 
+        ? 'to all managers/executioners'
+        : 'to all executioners';
+
+    await createActivityLog({
+      user_email: user.primaryEmailAddress.emailAddress,
+      land_record_id: recordId,
+      step: 6,
+      chat_id: chatData.id,
+      description: `Sent message ${recipientText}: ${message}`
+    });
+
+    // Handle review completion or push for review
+    if (isReviewComplete) {
+      if (role === 'reviewer') {
+        // Reviewer marking review as complete
+        await LandRecordService.updateLandRecord(recordId, { status: 'query' });
+        
+        await createActivityLog({
+          user_email: user.primaryEmailAddress.emailAddress,
+          land_record_id: recordId,
+          step: 6,
+          chat_id: null,
+          description: 'Reviewer marked the review as complete. Status changed to Query.'
+        });
+
+        setLandRecordStatus('query'); // UPDATE LOCAL STATE
+        toast({ title: "Review marked as complete. Status changed to Query." });
+        refreshStatus();
+      } else {
+        // Manager/Admin/Executioner pushing for review
+        await LandRecordService.updateLandRecord(recordId, { status: 'review' });
+        
+        await createActivityLog({
+          user_email: user.primaryEmailAddress.emailAddress,
+          land_record_id: recordId,
+          step: 6,
+          chat_id: null,
+          description: `${role.charAt(0).toUpperCase() + role.slice(1)} pushed the record for review. Status changed to Review.`
+        });
+
+        setLandRecordStatus('review'); // UPDATE LOCAL STATE
+        toast({ title: "Record pushed for review. Status changed to Review." });
+        refreshStatus();
+      }
+    } else {
+      toast({ title: "Message sent successfully" });
+    }
+
+    setShowCommentModal(false);
+  } catch (error) {
+    console.error('Error sending comment:', error);
+    toast({ 
+      title: "Error sending message", 
+      variant: "destructive" 
+    });
+  } finally {
+    setSendingComment(false);
   }
 };
 
@@ -949,40 +1328,44 @@ const getUniqueSNosWithTypes = () => {
   }
 
   return (
-    <Card className="w-full max-w-none">
-      <CardHeader>
-        <CardTitle className="text-lg sm:text-xl">Step 6: Output Views & Reports</CardTitle>
-      </CardHeader>
-      <CardContent className="p-4 sm:p-6">
-  <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4 mb-6">
-    <h2 className="text-lg font-semibold">Reports & Documents</h2>
-    <Button
-      onClick={handleDownloadIntegratedDocument}
-      className="flex items-center gap-2 w-full sm:w-auto"
-      variant="outline"
-      disabled={isGeneratingPDF}
-    >
-      <Download className="w-4 h-4" />
-      {isGeneratingPDF ? 'Generating...' : 'Download Integrated Document'}
-    </Button>
-    <Button
-  onClick={exportToExcel}
-  className="flex items-center gap-2 w-full sm:w-auto"
-  variant="outline"
->
-  <Download className="w-4 h-4" />
-  Export Output
-</Button>
-  </div>
-  <Tabs defaultValue="nondh-table" className="w-full">
-          <TabsList className="grid w-full grid-cols-4 mb-4">
-  <TabsTrigger value="nondh-table" className="text-xs sm:text-sm">Nondh Table</TabsTrigger>
-  <TabsTrigger value="query-list" className="text-xs sm:text-sm">Query List</TabsTrigger>
-  <TabsTrigger value="passbook" className="text-xs sm:text-sm">Passbook</TabsTrigger>
-  <TabsTrigger value="date-wise" className="text-xs sm:text-sm">Date-wise</TabsTrigger>
-</TabsList>
+    <>
+      <Card className="w-full max-w-none">
+        <CardHeader>
+          <CardTitle className="text-lg sm:text-xl">Step 6: Output Views & Reports</CardTitle>
+        </CardHeader>
+        <CardContent className="p-4 sm:p-6">
+          <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4 mb-6">
+            <h2 className="text-lg font-semibold">Reports & Documents</h2>
+            <div className="flex flex-col sm:flex-row gap-2">
+              <Button
+                onClick={handleDownloadIntegratedDocument}
+                className="flex items-center gap-2 w-full sm:w-auto"
+                variant="outline"
+                disabled={isGeneratingPDF}
+              >
+                <Download className="w-4 h-4" />
+                {isGeneratingPDF ? 'Generating...' : 'Download Integrated Document'}
+              </Button>
+              <Button
+                onClick={exportToExcel}
+                className="flex items-center gap-2 w-full sm:w-auto"
+                variant="outline"
+              >
+                <Download className="w-4 h-4" />
+                Export Output
+              </Button>
+            </div>
+          </div>
 
-<TabsContent value="nondh-table" className="space-y-4">
+          <Tabs defaultValue="nondh-table" className="w-full">
+            <TabsList className="grid w-full grid-cols-4 mb-4">
+              <TabsTrigger value="nondh-table" className="text-xs sm:text-sm">Nondh Table</TabsTrigger>
+              <TabsTrigger value="query-list" className="text-xs sm:text-sm">Query List</TabsTrigger>
+              <TabsTrigger value="passbook" className="text-xs sm:text-sm">Passbook</TabsTrigger>
+              <TabsTrigger value="date-wise" className="text-xs sm:text-sm">Date-wise</TabsTrigger>
+            </TabsList>
+
+            <TabsContent value="nondh-table" className="space-y-4">
   <div className="flex flex-col gap-4">
     <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-4">
       <h3 className="text-base sm:text-lg font-semibold">
@@ -1363,18 +1746,109 @@ const getUniqueSNosWithTypes = () => {
               )}
             </div>
           </TabsContent>
-        </Tabs>
+          </Tabs>
 
-        <div className="flex flex-col sm:flex-row sm:justify-center items-stretch sm:items-center gap-4 mt-6 pt-4 border-t">
-          <Button 
-            onClick={handleCompleteProcess}
-            className="w-full sm:w-auto"
-            size="sm"
-          >
-            Back to Land Master
-          </Button>
-        </div>
-      </CardContent>
-    </Card>
+         <div className="flex flex-col sm:flex-row sm:justify-center items-stretch sm:items-center gap-4 mt-6 pt-4 border-t">
+  {role === 'reviewer' ? (
+    landRecordStatus === 'review' && ( // ADD THIS CONDITION
+      <Button 
+        onClick={async () => {
+          if (!recordId || !user?.primaryEmailAddress?.emailAddress) return;
+          try {
+            await LandRecordService.updateLandRecord(recordId, { status: 'query' });
+            await createActivityLog({
+              user_email: user.primaryEmailAddress.emailAddress,
+              land_record_id: recordId,
+              step: 6,
+              chat_id: null,
+              description: 'Reviewer marked the review as complete. Status changed to Query.'
+            });
+            setLandRecordStatus('query'); // UPDATE LOCAL STATE
+            toast({ title: "Review marked as complete. Status changed to Query." });
+            refreshStatus();
+            router.push('/land-master');
+          } catch (error) {
+            console.error('Error marking review complete:', error);
+            toast({ title: "Error marking review complete", variant: "destructive" });
+          }
+        }}
+        className="w-full sm:w-auto flex items-center gap-2"
+        size="sm"
+      >
+        Mark Review Complete
+      </Button>
+    )
+  ) : (role === 'manager' || role === 'admin' || role === 'executioner') && (
+    landRecordStatus !== 'review' && ( // ADD THIS CONDITION
+      <Button 
+        onClick={async () => {
+          if (!recordId || !user?.primaryEmailAddress?.emailAddress) return;
+          try {
+            await LandRecordService.updateLandRecord(recordId, { status: 'review' });
+            await createActivityLog({
+              user_email: user.primaryEmailAddress.emailAddress,
+              land_record_id: recordId,
+              step: 6,
+              chat_id: null,
+              description: `${role.charAt(0).toUpperCase() + role.slice(1)} pushed the record for review. Status changed to Review.`
+            });
+            setLandRecordStatus('review'); // UPDATE LOCAL STATE
+            toast({ title: "Record pushed for review. Status changed to Review." });
+            refreshStatus();
+            router.push('/land-master');
+          } catch (error) {
+            console.error('Error pushing for review:', error);
+            toast({ title: "Error pushing for review", variant: "destructive" });
+          }
+        }}
+        className="w-full sm:w-auto flex items-center gap-2"
+        size="sm"
+      >
+        Push for Review
+      </Button>
+    )
+  )}
+  {/* END NEW SECTION */}
+  {(role === 'manager' || role === 'admin' || role === 'reviewer' || role === 'executioner') && (
+    <Button 
+      onClick={() => setShowCommentModal(true)}
+      className="w-full sm:w-auto flex items-center gap-2"
+      size="sm"
+      variant="outline"
+    >
+      <Send className="w-4 h-4" />
+      {role === 'reviewer' 
+        ? 'Send Message to Manager/Executioner'
+        : role === 'executioner'
+        ? 'Send Message to Manager/Reviewer'
+        : 'Send Message to Executioner/Reviewer'}
+    </Button>
+  )}
+  
+  
+  <Button 
+    onClick={handleCompleteProcess}
+    className="w-full sm:w-auto"
+    size="sm"
+  >
+    Back to Land Master
+  </Button>
+</div>
+        </CardContent>
+      </Card>
+
+      {/* Comment Modal */}
+      {showCommentModal && (
+        <CommentModal
+          isOpen={showCommentModal}
+          onClose={() => setShowCommentModal(false)}
+          onSubmit={handleSendComment}
+          loading={sendingComment}
+          step={6}
+          userRole={role || ''}
+          landRecordStatus={landRecordStatus} 
+        />
+      )}
+    </>
   )
 }

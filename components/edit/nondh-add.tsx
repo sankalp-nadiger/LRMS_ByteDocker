@@ -8,7 +8,8 @@ import { Label } from "@/components/ui/label"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Trash2, Plus, Upload, Save, Loader2 } from "lucide-react"
 import { useLandRecord } from "@/contexts/land-record-context"
-import { supabase, uploadFile } from "@/lib/supabase"
+import { supabase, createActivityLog, uploadFile } from '@/lib/supabase'
+import { useUser } from "@clerk/nextjs"
 import { useToast } from "@/hooks/use-toast"
 import { useRouter } from 'next/navigation'
 import { LandRecordService } from "@/lib/supabase"
@@ -34,6 +35,7 @@ function isEqual(obj1: any, obj2: any) {
 export default function NondhAdd() {
   const { recordId, yearSlabs, landBasicInfo, setHasUnsavedChanges, currentStep, setCurrentStep } = useLandRecord()
   const { toast } = useToast()
+  const { user } = useUser()
   const router = useRouter()
   const [loading, setLoading] = useState(false)
   const [uploadingFiles, setUploadingFiles] = useState<Set<string>>(new Set())
@@ -371,6 +373,21 @@ export default function NondhAdd() {
         const { error: deleteError } = await LandRecordService.deleteNondhs(nondhsToDelete)
         if (deleteError) throw deleteError
       }
+
+      // Update land record status to drafting
+      await LandRecordService.updateLandRecord(recordId, {
+        status: "drafting",
+        current_step: currentStep
+      });
+
+      // Create activity log
+      await createActivityLog({
+        user_email: user?.primaryEmailAddress?.emailAddress || "",
+        land_record_id: recordId,
+        step: currentStep,
+        chat_id: null,
+        description: `Updated ${validNondhs.length} nondh records`
+      });
 
       // Update original data
       setOriginalNondhs(validNondhs)

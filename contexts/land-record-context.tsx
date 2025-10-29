@@ -168,6 +168,8 @@ interface LandRecordContextType {
   formData: LocalFormData
   setFormData: (data: LocalFormData | ((prev: LocalFormData) => LocalFormData)) => void
   updateFormData: (step: number, data: Partial<LocalFormData[number]>) => void
+  refreshStatus: () => void
+    statusRefreshTrigger: number 
 }
 
 const LandRecordContext = createContext<LandRecordContextType | undefined>(undefined)
@@ -236,6 +238,7 @@ useEffect(() => {
   const [nondhs, setNondhs] = useState<Nondh[]>([])
   const [nondhDetails, setNondhDetails] = useState<NondhDetail[]>([])
   const [formData, setFormDataState] = useState<LocalFormData>({})
+  const [statusRefreshTrigger, setStatusRefreshTrigger] = useState(0)
   const [hasUnsavedChanges, setRawHasUnsavedChanges] = useState<Record<number, boolean>>({
     1: false,
     2: false,
@@ -303,6 +306,10 @@ useEffect(() => {
     })
   }, [])
 
+  const refreshStatus = useCallback(() => {
+  setStatusRefreshTrigger(prev => prev + 1)
+}, [])
+
   const canProceedToStep = useCallback((step: number) => {
     if (step <= currentStep) return true
     if (step === 2 && formData[1]?.landBasicInfo) return true
@@ -336,7 +343,9 @@ useEffect(() => {
         updateFormData,
         hasUnsavedChanges,
         setHasUnsavedChanges,
-        resetUnsavedChanges
+        resetUnsavedChanges,
+        refreshStatus,  // ADD THIS LINE
+      statusRefreshTrigger
       }}
     >
       {children}

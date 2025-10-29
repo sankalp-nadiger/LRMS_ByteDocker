@@ -12,11 +12,15 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Settings } from "lucide-react";
+import { Settings, Users } from "lucide-react";
+import { useUserRole } from "@/contexts/user-context";
+import { NotificationsMenu } from "@/components/notifications-menu";
 
 export function TopNavbar() {
   const { membership } = useOrganization();
+  const { role, isAdmin } = useUserRole();
   const isOwner = membership?.role === "org:admin" || membership?.role === "owner";
+  const isManager = role === "manager";
 
   return (
     <header className="flex h-12 sm:h-16 items-center justify-between border-b bg-white px-4 sm:px-6">
@@ -32,6 +36,9 @@ export function TopNavbar() {
 
       <div className="flex items-center gap-2 sm:gap-4">
         <SignedIn>
+          {/* Show notifications menu for all users */}
+          <NotificationsMenu />
+          
           {/* Show owner-specific dropdown */}
           {isOwner && (
             <DropdownMenu>
@@ -44,6 +51,24 @@ export function TopNavbar() {
                 <DropdownMenuItem asChild>
                   <Link href="/organization-settings">
                     Manage Organization
+                  </Link>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
+          
+          {/* Show admin-specific dropdown */}
+          {isAdmin && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="sm">
+                  <Users className="h-4 w-4 mr-2" /> Users
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem asChild>
+                  <Link href="/user-management">
+                    Manage Users
                   </Link>
                 </DropdownMenuItem>
               </DropdownMenuContent>

@@ -18,7 +18,8 @@ CREATE TABLE land_records (
     integrated_712 VARCHAR(255),
     
     -- Status
-    status VARCHAR(20) DEFAULT 'draft' CHECK (status IN ('draft', 'completed', 'submitted')),
+    status VARCHAR(20) DEFAULT 'initiated' 
+        CHECK (status IN ('initiated', 'drafting', 'review', 'query', 'review2', 'completed')),
     current_step INTEGER DEFAULT 1
 );
 
@@ -165,6 +166,46 @@ CREATE TABLE broker_land_records (
     UNIQUE (broker_id, land_record_id)
 );
 
+CREATE TABLE activity_logs (
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
+
+    -- Core Info
+    user_email VARCHAR(255) NOT NULL,
+    land_record_id UUID REFERENCES land_records(id) ON DELETE CASCADE,
+    step INTEGER,
+    chat_id UUID,
+    description TEXT NOT NULL
+);
+
+CREATE TABLE chats (
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
+
+    from_email VARCHAR(255) NOT NULL,
+    to_email TEXT[], -- array of recipients, can be empty or NULL
+    message TEXT NOT NULL,
+    land_record_id UUID REFERENCES land_records(id) ON DELETE CASCADE,
+    step INTEGER,
+
+    -- Read tracking
+    read_by TEXT[] DEFAULT '{}' -- stores list of emails who have read the message
+);
+
+CREATE TABLE projects (
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
+
+    -- Basic Info
+    name VARCHAR(255) NOT NULL,
+    description TEXT,
+    created_by_email VARCHAR(255) NOT NULL,
+
+    -- Relation to land records (multiple per project)
+    land_record_ids UUID[] DEFAULT '{}'
+);
+
 
 -- Create indexes for better performance
 CREATE INDEX idx_land_records_district ON land_records(district);
@@ -178,6 +219,10 @@ CREATE INDEX idx_nondh_owner_relations_detail_id ON nondh_owner_relations(nondh_
 CREATE INDEX IF NOT EXISTS idx_brokers_status ON brokers(status);
 CREATE INDEX IF NOT EXISTS idx_broker_land_records_broker_id ON broker_land_records(broker_id);
 CREATE INDEX IF NOT EXISTS idx_broker_land_records_status ON broker_land_records(status);
+
+CREATE INDEX idx_activity_logs_land_record ON activity_logs(land_record_id);
+CREATE INDEX idx_chats_land_record ON chats(land_record_id);
+CREATE INDEX idx_projects_created_by ON projects(created_by_email);
 
 -- Enable Row Level Security (RLS)
 ALTER TABLE land_records ENABLE ROW LEVEL SECURITY;

@@ -9,6 +9,7 @@ import { Toaster } from "@/components/ui/toaster"
 import { LRMSProvider } from "@/contexts/lrms-context"
 import { ClerkProvider } from '@clerk/nextjs'
 import { OrgProvider } from "@/contexts/org-context";
+import { UserProvider } from "@/contexts/user-context";
 
 const inter = Inter({ subsets: ["latin"] })
 
@@ -34,18 +35,20 @@ export default function RootLayout({
       <html lang="en">
         <body className={inter.className}>
           <OrgProvider>
-            <LRMSProvider>
-              <SidebarProvider>
-                <div className="flex min-h-screen w-full">
-                  <AppSidebar />
-                  <div className="flex-1 flex flex-col">
-                    <TopNavbar />
-                    <main className="flex-1 p-6 bg-gray-50">{children}</main>
+            <UserProvider>
+              <LRMSProvider>
+                <SidebarProvider>
+                  <div className="flex min-h-screen w-full">
+                    <AppSidebar />
+                    <div className="flex-1 flex flex-col">
+                      <TopNavbar />
+                      <main className="flex-1 p-6 bg-gray-50">{children}</main>
+                    </div>
                   </div>
-                </div>
-                <Toaster />
-              </SidebarProvider>
-            </LRMSProvider>
+                  <Toaster />
+                </SidebarProvider>
+              </LRMSProvider>
+            </UserProvider>
           </OrgProvider>
         </body>
       </html>

@@ -48,9 +48,12 @@ import {
   ChevronRight,
   RefreshCw,
   AlertCircle,
+  List,
+  Grid,
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import Link from "next/link";
+import { useUserRole } from "@/contexts/user-context";
 
 interface LandRecord {
   id: string;
@@ -77,6 +80,8 @@ interface Broker {
 
 const ITEMS_PER_PAGE = 5;
 
+type ViewMode = "list" | "detailed";
+
 export default function BrokerDashboard() {
   const router = useRouter();
   const [brokers, setBrokers] = useState<Broker[]>([]);
@@ -88,6 +93,8 @@ export default function BrokerDashboard() {
   const [currentPage, setCurrentPage] = useState(1);
   const [reviveBrokerId, setReviveBrokerId] = useState<string | null>(null);
   const [reviving, setReviving] = useState(false);
+  const [viewMode, setViewMode] = useState<ViewMode>("list");
+  const { role } = useUserRole();
 
   useEffect(() => {
     fetchBrokers();
@@ -106,36 +113,36 @@ export default function BrokerDashboard() {
       if (brokersError) throw brokersError;
 
       const { data: brokerLands, error: landsError } = await supabase
-  .from("broker_land_records")
-  .select(`
-    broker_id,
-    last_offer,
-    status,
-    land_records (
-      id,
-      district,
-      village,
-      block_no,
-      re_survey_no
-    )
-  `);
+        .from("broker_land_records")
+        .select(`
+          broker_id,
+          last_offer,
+          status,
+          land_records (
+            id,
+            district,
+            village,
+            block_no,
+            re_survey_no
+          )
+        `);
 
       if (landsError) throw landsError;
 
       const brokersWithLands = brokersData?.map((broker) => ({
-  ...broker,
-  land_records: brokerLands
-    ?.filter((bl) => bl.broker_id === broker.id)
-    .map((bl) => ({
-      id: bl.land_records.id,
-      district: bl.land_records.district,
-      village: bl.land_records.village,
-      block_no: bl.land_records.block_no,  
-      re_survey_no: bl.land_records.re_survey_no,   
-      last_offer: bl.last_offer,
-      status: bl.status,
-    })) || [],
-})) || [];
+        ...broker,
+        land_records: brokerLands
+          ?.filter((bl) => bl.broker_id === broker.id)
+          .map((bl) => ({
+            id: bl.land_records.id,
+            district: bl.land_records.district,
+            village: bl.land_records.village,
+            block_no: bl.land_records.block_no,  
+            re_survey_no: bl.land_records.re_survey_no,   
+            last_offer: bl.last_offer,
+            status: bl.status,
+          })) || [],
+      })) || [];
 
       setBrokers(brokersWithLands);
     } catch (err) {
@@ -226,6 +233,26 @@ export default function BrokerDashboard() {
           </p>
         </div>
         <div className="flex flex-col sm:flex-row gap-2">
+          <div className="flex gap-1 bg-muted p-1 rounded-lg">
+            <Button
+              variant={viewMode === "list" ? "default" : "ghost"}
+              size="sm"
+              onClick={() => setViewMode("list")}
+              className="h-9 px-3"
+            >
+              <List className="h-4 w-4 mr-2" />
+              List
+            </Button>
+            <Button
+              variant={viewMode === "detailed" ? "default" : "ghost"}
+              size="sm"
+              onClick={() => setViewMode("detailed")}
+              className="h-9 px-3"
+            >
+              <Grid className="h-4 w-4 mr-2" />
+              Detailed
+            </Button>
+          </div>
           <Button
             onClick={fetchBrokers}
             variant="outline"
@@ -236,6 +263,7 @@ export default function BrokerDashboard() {
             <RefreshCw className="h-4 w-4 mr-2" />
             Refresh
           </Button>
+        {role !== 'reviewer' && (
           <Button
             onClick={() => router.push("/brokers/new")}
             className="w-full sm:w-auto"
@@ -243,14 +271,19 @@ export default function BrokerDashboard() {
             <Plus className="h-4 w-4 mr-2" />
             Add Broker
           </Button>
+        )}
         </div>
       </div>
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-lg sm:text-xl">Brokers</CardTitle>
+          <CardTitle className="text-lg sm:text-xl">
+            {viewMode === "list" ? "Brokers List" : "Brokers"}
+          </CardTitle>
           <CardDescription className="text-sm">
-            View and manage all registered brokers and their land assignments
+            {viewMode === "list" 
+              ? "Quick overview of all brokers in a table format" 
+              : "View and manage all registered brokers and their land assignments"}
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -383,7 +416,92 @@ export default function BrokerDashboard() {
                     : "No brokers match your search criteria."}
                 </p>
               </div>
+            ) : viewMode === "list" ? (
+              // List View - Table Format
+              <div className="border rounded-lg overflow-hidden">
+                <div className="overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Name</TableHead>
+                        <TableHead>Broker Number</TableHead>
+                        <TableHead>Phone</TableHead>
+                        <TableHead>Area</TableHead>
+                        <TableHead>Rating</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead>Assigned Lands</TableHead>
+                        {role !== 'reviewer' && (
+                          <TableHead className="text-right">Actions</TableHead>
+                        )}
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {paginatedBrokers.map((broker) => (
+                        <TableRow key={broker.id}>
+                          <TableCell className="font-medium">
+                            <div>
+                              <div>{broker.name}</div>
+                              {broker.recent_task && (
+                                <div className="text-xs text-muted-foreground mt-1">
+                                  {broker.recent_task}
+                                </div>
+                              )}
+                            </div>
+                          </TableCell>
+                          <TableCell>{broker.broker_number || "-"}</TableCell>
+                          <TableCell>{broker.phone_number}</TableCell>
+                          <TableCell>{broker.area || "-"}</TableCell>
+                          <TableCell>
+                            {broker.rating ? (
+                              <div className="flex items-center">
+                                <span>⭐ {broker.rating}/5</span>
+                              </div>
+                            ) : (
+                              "-"
+                            )}
+                          </TableCell>
+                          <TableCell>
+                            <Badge
+                              variant={
+                                broker.status === "active" ? "default" : "secondary"
+                              }
+                            >
+                              {broker.status}
+                            </Badge>
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant="outline">
+                              {broker.land_records.length} lands
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="text-right">
+                            {role !== 'reviewer' && (
+                            <div className="flex justify-end gap-2">
+                              {broker.status === "inactive" && (
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => setReviveBrokerId(broker.id)}
+                                >
+                                  <RefreshCw className="h-4 w-4" />
+                                </Button>
+                              )}
+                              <Link href={`/brokers/update/${broker.id}`}>
+                                <Button variant="outline" size="sm">
+                                  Update
+                                </Button>
+                              </Link>
+                            </div>
+                            )}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              </div>
             ) : (
+              // Detailed View - Original Card Format
               paginatedBrokers.map((broker) => (
                 <Card key={broker.id} className="p-4 sm:p-6">
                   <div className="space-y-4">
@@ -422,6 +540,7 @@ export default function BrokerDashboard() {
                         </div>
                       </div>
 
+                      {role !== 'reviewer' && (
                       <div className="flex gap-2">
                         {broker.status === "inactive" && (
                           <Button
@@ -433,12 +552,14 @@ export default function BrokerDashboard() {
                             Revive
                           </Button>
                         )}
+
                         <Link href={`/brokers/update/${broker.id}`}>
                           <Button variant="outline" size="sm">
-                            View/Update
+                            Update
                           </Button>
                         </Link>
                       </div>
+                      )}
                     </div>
 
                     {broker.recent_task && (

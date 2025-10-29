@@ -18,7 +18,8 @@ import {
   SlabEntry,
   Panipatrak,
 } from "@/contexts/land-record-context";
-import { LandRecordService } from "@/lib/supabase"; 
+import { LandRecordService, createActivityLog } from "@/lib/supabase";
+import { useUser } from "@clerk/nextjs";
 import { toast } from "@/hooks/use-toast";
 import { convertToSquareMeters, convertFromSquareMeters } from "@/lib/supabase";
 import { useStepFormData } from "@/hooks/use-step-form-data";
@@ -365,6 +366,7 @@ export default function PanipatrakStep() {
   const [expandedPeriods, setExpandedPeriods] = useState<Record<string, boolean>>({});
     const [hasChanges, setHasChanges] = useState(false);
   const [originalData, setOriginalData] = useState<any>(null);
+  const { user } = useUser();
 
   const [slabPanels, setSlabPanels] = useState<{
   [slabId: string]: {
@@ -970,6 +972,14 @@ const updateFarmer = (
     );
 
     if (error) throw error;
+
+    await createActivityLog({
+      user_email: user?.primaryEmailAddress?.emailAddress || "",
+      land_record_id: landBasicInfo.id,
+      step: currentStep,
+      chat_id: null,
+      description: `Added panipatraks: ${allPanipatraks.length} panipatraks configured`
+    });
 
     setCurrentStep(4);
     toast({ title: "Panipatraks saved successfully" });

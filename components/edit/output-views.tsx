@@ -8,11 +8,15 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
-import { Download, Eye, Filter, Calendar, AlertTriangle } from "lucide-react"
+import { Download, Eye, Filter, Calendar, AlertTriangle, Send, X, Loader2 } from "lucide-react"
 import { useLandRecord } from "@/contexts/land-record-context"
 import { convertToSquareMeters, LandRecordService } from "@/lib/supabase"
 import { useToast } from "@/hooks/use-toast"
 import { useRouter } from "next/navigation"
+import { useUser } from "@clerk/nextjs"
+import { createActivityLog, createChat } from "@/lib/supabase"
+import { useUserRole } from '@/contexts/user-context'
+import { useRef } from "react"
 
 interface PassbookEntry {
   year: number
@@ -49,11 +53,257 @@ interface Nondh {
   affected_s_nos: any[]
   nondh_doc_url?: string
 }
+interface User {
+  id: string;
+  email: string;
+  fullName: string;
+  role: string;
+}
+
+// Comment Modal Component
+interface CommentModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  onSubmit: (message: string, recipients: string[], isPushForReview?: boolean) => Promise<void>;
+  loading?: boolean;
+  step: number;
+  userRole: string;
+  landRecordStatus?: string;
+}
+
+const CommentModal = ({ isOpen, onClose, onSubmit, loading = false, step, userRole, landRecordStatus }: CommentModalProps) => {
+  const [message, setMessage] = useState('');
+  const [showMentionDropdown, setShowMentionDropdown] = useState(false);
+  const [mentionSearch, setMentionSearch] = useState('');
+  const [selectedRecipients, setSelectedRecipients] = useState<string[]>([]);
+  const [cursorPosition, setCursorPosition] = useState(0);
+  const [users, setUsers] = useState<User[]>([]);
+  const [isPushForReview, setIsPushForReview] = useState(false);
+  const { user } = useUser();
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const modalTitle = userRole === 'executioner'
+    ? `Send Message to Manager/Reviewer - Step ${step}`
+    : `Send Message to Executioner/Reviewer - Step ${step}`;
+
+  useEffect(() => {
+    if (isOpen) {
+      const fetchUsers = async () => {
+        try {
+          const response = await fetch('/api/users/list');
+          if (!response.ok) throw new Error('Failed to fetch users');
+          const data = await response.json();
+          setUsers(data.users);
+        } catch (error) {
+          console.error('Error fetching users:', error);
+        }
+      };
+      fetchUsers();
+      setMessage('');
+      setSelectedRecipients([]);
+      setShowMentionDropdown(false);
+      setIsPushForReview(landRecordStatus === 'review');
+    }
+  }, [isOpen, landRecordStatus]);
+
+  const handleMessageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    const position = e.target.selectionStart || 0;
+    
+    setMessage(value);
+    setCursorPosition(position);
+
+    const textBeforeCursor = value.substring(0, position);
+    const lastAtIndex = textBeforeCursor.lastIndexOf('@');
+    
+    if (lastAtIndex !== -1) {
+      const afterAt = textBeforeCursor.substring(lastAtIndex + 1);
+      const beforeAt = textBeforeCursor.substring(0, lastAtIndex);
+      if (beforeAt === '' || beforeAt.endsWith(' ')) {
+        setMentionSearch(afterAt);
+        setShowMentionDropdown(true);
+        return;
+      }
+    }
+    
+    setShowMentionDropdown(false);
+  };
+
+  const handleMentionSelect = (userEmail: string, userName: string) => {
+    const textBeforeCursor = message.substring(0, cursorPosition);
+    const textAfterCursor = message.substring(cursorPosition);
+    const lastAtIndex = textBeforeCursor.lastIndexOf('@');
+    
+    const beforeMention = message.substring(0, lastAtIndex);
+    const newText = beforeMention + `@${userName} ` + textAfterCursor;
+    
+    setMessage(newText);
+    setSelectedRecipients([...selectedRecipients, userEmail]);
+    setShowMentionDropdown(false);
+    setMentionSearch('');
+    
+    setTimeout(() => {
+      inputRef.current?.focus();
+    }, 0);
+  };
+
+  const removeMention = (email: string) => {
+    setSelectedRecipients(selectedRecipients.filter(e => e !== email));
+  };
+
+  const getUserByEmail = (email: string) => {
+    return users.find(u => u.email === email);
+  };
+
+  const filteredUsers = users
+    .filter(u => u.email !== user?.primaryEmailAddress?.emailAddress)
+    .filter(u => !selectedRecipients.includes(u.email))
+    .filter(u => 
+      mentionSearch === '' || 
+      u.fullName.toLowerCase().includes(mentionSearch.toLowerCase()) ||
+      u.email.toLowerCase().includes(mentionSearch.toLowerCase())
+    );
+
+  const handleSubmit = async () => {
+    if (!message.trim()) return;
+    await onSubmit(message, selectedRecipients, isPushForReview);
+    setMessage('');
+    setSelectedRecipients([]);
+    setIsPushForReview(false);
+  };
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+      <Card className="w-full max-w-lg max-h-[80vh] overflow-hidden flex flex-col">
+        <CardHeader className="flex-shrink-0 border-b bg-white sticky top-0 z-10">
+          <div className="flex justify-between items-center">
+            <CardTitle>{modalTitle}</CardTitle>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={onClose}
+              disabled={loading}
+            >
+              <X className="w-4 h-4" />
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-4 overflow-y-auto flex-1 p-6 pt-4">
+          {selectedRecipients.length > 0 && (
+            <div className="flex flex-wrap gap-2 mb-2">
+              {selectedRecipients.map(email => {
+                const recipient = getUserByEmail(email);
+                return (
+                  <span key={email} className="inline-flex items-center gap-1 px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-sm">
+                    {recipient?.fullName || email}
+                    <button
+                      onClick={() => removeMention(email)}
+                      className="hover:text-blue-900 text-xs"
+                    >
+                      ×
+                    </button>
+                  </span>
+                );
+              })}
+            </div>
+          )}
+
+          <div className="space-y-2">
+            <Label htmlFor="comment-message">Message</Label>
+            <div className="relative">
+              <input
+                ref={inputRef}
+                id="comment-message"
+                type="text"
+                value={message}
+                onChange={handleMessageChange}
+                placeholder={userRole === 'executioner'
+                  ? "Type @ to mention someone or send to all managers/reviewers..."
+                  : "Type @ to mention someone or send to all executioners/reviewers..."}
+                disabled={loading}
+                onKeyPress={(e) => e.key === 'Enter' && !showMentionDropdown && handleSubmit()}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              />
+
+              {showMentionDropdown && filteredUsers.length > 0 && (
+                <div className="absolute top-full left-0 mt-1 w-full bg-white border border-gray-300 rounded-lg shadow-lg max-h-48 overflow-y-auto z-20">
+                  {filteredUsers.map(u => (
+                    <button
+                      key={u.id}
+                      onClick={() => handleMentionSelect(u.email, u.fullName)}
+                      className="w-full text-left px-4 py-2 hover:bg-gray-100 flex items-center justify-between border-b border-gray-100 last:border-b-0"
+                    >
+                      <div className="flex flex-col items-start">
+                        <span className="font-medium text-sm">{u.fullName}</span>
+                        <span className="text-xs text-gray-500">{u.email}</span>
+                      </div>
+                      <span className="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded">
+                        {u.role.charAt(0).toUpperCase() + u.role.slice(1)}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            <p className="text-xs text-gray-500">
+              Type @ to mention specific users, or send to all {userRole === 'executioner' ? 'managers/reviewers' : 'executioners/reviewers'}
+            </p>
+          </div>
+
+          {(userRole === 'manager' || userRole === 'admin' || userRole === 'executioner') && (
+            <div className="flex items-center gap-2 p-3 bg-green-50 border border-green-200 rounded-lg">
+              <input
+                type="checkbox"
+                id="push-review"
+                checked={isPushForReview}
+                disabled={landRecordStatus === 'review'}
+                onChange={(e) => setIsPushForReview(e.target.checked)}
+                className="w-4 h-4 text-green-600 rounded focus:ring-green-500"
+              />
+              <Label htmlFor="push-review" className="text-sm font-medium cursor-pointer">
+                Push for Review {landRecordStatus === 'review' && '(Already in Review)'}
+              </Label>
+            </div>
+          )}
+          
+          <div className="flex gap-2 pt-4">
+            <Button
+              variant="outline"
+              onClick={onClose}
+              disabled={loading}
+              className="flex-1"
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleSubmit}
+              disabled={loading || !message.trim()}
+              className="flex-1 flex items-center gap-2"
+            >
+              {loading ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <Send className="w-4 h-4" />
+              )}
+              Send Message
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+};
 
 export default function OutputViews() {
   const { landBasicInfo, recordId, yearSlabs } = useLandRecord()
   const { toast } = useToast()
   const router = useRouter()
+  const { user } = useUser()
+  const { role } = useUserRole()
+const [showCommentModal, setShowCommentModal] = useState(false)
+const [sendingComment, setSendingComment] = useState(false)
   const [passbookData, setPassbookData] = useState<PassbookEntry[]>([])
   const [nondhDetails, setNondhDetails] = useState<NondhDetail[]>([])
   const [nondhs, setNondhs] = useState<Nondh[]>([])
@@ -63,6 +313,7 @@ export default function OutputViews() {
   const [sNoFilter, setSNoFilter] = useState("")
   const [loading, setLoading] = useState(true)
 const [isGeneratingPDF, setIsGeneratingPDF] = useState(false)
+const [landRecordStatus, setLandRecordStatus] = useState<string>('');
 
  // Helper function to format affected S.Nos properly
 const formatAffectedSNos = (affectedSNos: any, availableSNos?: Array<{value: string, type: string, label: string}>): string => {
@@ -128,6 +379,26 @@ const formatAffectedSNos = (affectedSNos: any, availableSNos?: Array<{value: str
     return typeof affectedSNos === 'string' ? affectedSNos : JSON.stringify(affectedSNos);
   }
 };
+// Fetch land record status
+useEffect(() => {
+  const fetchLandRecordStatus = async () => {
+    if (!recordId) return;
+    
+    try {
+      const { data, error } = await LandRecordService.getLandRecord(recordId);
+      if (error) throw error;
+      if (data) {
+        setLandRecordStatus(data.status || '');
+      }
+    } catch (error) {
+      console.error('Error fetching land record status:', error);
+    }
+  };
+
+  if (recordId) {
+    fetchLandRecordStatus();
+  }
+}, [recordId]);
 
 const handleDownloadIntegratedDocument = async () => {
 
@@ -794,9 +1065,92 @@ const getUniqueSNosWithTypes = () => {
   }
 }
 
-  const handleCompleteProcess = () => {
-    toast({ title: "Land records fetched successfully!" })
-    router.push('/land-master')
+const handleSendComment = async (message: string, recipients: string[], isPushForReview: boolean = false) => {
+  if (!recordId || !user?.primaryEmailAddress?.emailAddress) return;
+
+  try {
+    setSendingComment(true);
+
+    const toEmails = recipients.length > 0 ? recipients : null;
+
+    const chatData = await createChat({
+      from_email: user.primaryEmailAddress.emailAddress,
+      to_email: toEmails,
+      message: message,
+      land_record_id: recordId,
+      step: 6
+    });
+
+    const recipientText = toEmails 
+      ? `to ${toEmails.length} recipient(s)` 
+      : role === 'executioner'
+        ? 'to all managers/reviewers'
+        : 'to all executioners/reviewers';
+
+    await createActivityLog({
+      user_email: user.primaryEmailAddress.emailAddress,
+      land_record_id: recordId,
+      step: 6,
+      chat_id: chatData.id,
+      description: `Sent message ${recipientText}: ${message}`
+    });
+
+    if (isPushForReview) {
+      await LandRecordService.updateLandRecord(recordId, { status: 'review' });
+      
+      await createActivityLog({
+        user_email: user.primaryEmailAddress.emailAddress,
+        land_record_id: recordId,
+        step: 6,
+        chat_id: null,
+        description: `${role?.charAt(0).toUpperCase()}${role?.slice(1)} pushed the record for review. Status changed to Review.`
+      });
+
+      toast({ title: "Record pushed for review. Status changed to Review." });
+    } else {
+      toast({ title: "Message sent successfully" });
+    }
+
+    setShowCommentModal(false);
+  } catch (error) {
+    console.error('Error sending comment:', error);
+    toast({ 
+      title: "Error sending message", 
+      variant: "destructive" 
+    });
+  } finally {
+    setSendingComment(false);
+  }
+};
+
+  const handleCompleteProcess = async () => {
+    try {
+      // Update land record status to "review"
+      const { error } = await LandRecordService.updateLandRecord(recordId, {
+        status: "review"
+      });
+
+      if (error) throw error;
+
+      // Create activity log
+      await createActivityLog({
+        user_email: user?.primaryEmailAddress?.emailAddress || "",
+        land_record_id: recordId,
+        step: 6, // Output views is step 4
+        chat_id: null,
+        description: "Sent for review from output view"
+      });
+
+      toast({ title: "Process completed. Record sent for review!" });
+      router.push('/land-master');
+    } catch (err) {
+      console.error('Error completing process:', err);
+      toast({ 
+        title: "Error",
+        description: "Failed to complete process. Please try again.",
+        variant: "destructive"
+      });
+    }
   }
 
   const renderQueryListCard = (nondh: NondhDetail, index: number) => {    
@@ -1366,15 +1720,71 @@ const getUniqueSNosWithTypes = () => {
         </Tabs>
 
         <div className="flex flex-col sm:flex-row sm:justify-center items-stretch sm:items-center gap-4 mt-6 pt-4 border-t">
-          <Button 
-            onClick={handleCompleteProcess}
-            className="w-full sm:w-auto"
-            size="sm"
-          >
-            Back to Land Master
-          </Button>
-        </div>
+            
+  {(role === 'manager' || role === 'admin' || role === 'executioner') && landRecordStatus !== 'review' && ( // ADD landRecordStatus check
+  <Button 
+    onClick={async () => {
+      if (!recordId || !user?.primaryEmailAddress?.emailAddress) return;
+      try {
+        await LandRecordService.updateLandRecord(recordId, { status: 'review' });
+        await createActivityLog({
+          user_email: user.primaryEmailAddress.emailAddress,
+          land_record_id: recordId,
+          step: 6,
+          chat_id: null,
+          description: `${role?.charAt(0).toUpperCase()}${role?.slice(1)} pushed the record for review. Status changed to Review.`
+        });
+        setLandRecordStatus('review'); // UPDATE LOCAL STATE
+        toast({ title: "Record pushed for review. Status changed to Review." });
+        router.push('/land-master');
+      } catch (error) {
+        console.error('Error pushing for review:', error);
+        toast({ title: "Error pushing for review", variant: "destructive" });
+      }
+    }}
+    className="w-full sm:w-auto flex items-center gap-2"
+    size="sm"
+  >
+    Push for Review
+  </Button>
+)}
+  {(role === 'manager' || role === 'admin' || role === 'executioner') && (
+    <Button 
+      onClick={() => setShowCommentModal(true)}
+      className="w-full sm:w-auto flex items-center gap-2"
+      size="sm"
+      variant="outline"
+    >
+      <Send className="w-4 h-4" />
+      {role === 'executioner'
+        ? 'Send Message to Manager/Reviewer'
+        : 'Send Message to Executioner/Reviewer'}
+    </Button>
+  )}
+  
+  <Button 
+    onClick={() => {
+      toast({ title: "Returning to Land Master" });
+      router.push('/land-master');
+    }}
+    className="w-full sm:w-auto"
+    size="sm"
+  >
+    Back to Land Master
+  </Button>
+</div>
       </CardContent>
+{showCommentModal && (
+  <CommentModal
+    isOpen={showCommentModal}
+    onClose={() => setShowCommentModal(false)}
+    onSubmit={handleSendComment}
+    loading={sendingComment}
+    step={6}
+    userRole={role || ''}
+    landRecordStatus={landRecordStatus}
+  />
+)}
     </Card>
   )
 }
