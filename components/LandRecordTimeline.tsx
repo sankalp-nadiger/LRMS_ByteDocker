@@ -35,6 +35,7 @@ interface LandRecord {
   village: string;
   block_no: string;
   created_at: string;
+  comments?: string | null;
 }
 
 interface Broker {
@@ -117,6 +118,12 @@ export default function LandRecordTimelinePage({ landId, showHeader = true }: La
   const chatEndRef = useRef<HTMLDivElement>(null);
   const ownerChatEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  const [showCompletionModal, setShowCompletionModal] = useState(false);
+const [completionComment, setCompletionComment] = useState('');
+const [selectedBrokerForOffer, setSelectedBrokerForOffer] = useState<string>('');
+const [brokerOffer, setBrokerOffer] = useState('');
+const [brokerStatusForCompletion, setBrokerStatusForCompletion] = useState('');
 
   // Fetch users
   useEffect(() => {
@@ -543,6 +550,7 @@ export default function LandRecordTimelinePage({ landId, showHeader = true }: La
   };
 
   const groupedLogs = groupLogsByRole();
+  const isOffer = selectedLand?.status === 'offer';
   const isCompleted = selectedLand?.status === 'completed';
   const isQuery = selectedLand?.status === 'query';
   const isReview2 = selectedLand?.status === 'review2';
@@ -551,7 +559,9 @@ export default function LandRecordTimelinePage({ landId, showHeader = true }: La
   const canSendExternalReview = ['manager', 'admin'].includes(userRole || '') && (isQuery || isReview2);
   const canSendBrokerMessage = brokers.some(b => b.broker?.status === 'active') && 
     ['manager', 'admin', 'executioner'].includes(userRole || '') && (isQuery || isReview2);
-  const canMarkCompleted = ['manager', 'admin'].includes(userRole || '') && !isCompleted;
+ const canPushToOffer = ['manager', 'admin'].includes(userRole || '') && 
+  !['offer', 'drafting', 'review', 'initiated', 'completed'].includes(selectedLand?.status || '');
+const canMarkCompleted = ['manager', 'admin'].includes(userRole || '') && !isCompleted;
 
   const handleMarkAsCompleted = async () => {
     if (!selectedLandId || !user?.primaryEmailAddress?.emailAddress) {
@@ -591,6 +601,119 @@ export default function LandRecordTimelinePage({ landId, showHeader = true }: La
     }
   };
 
+  const handlePushToOffer = async () => {
+  if (!selectedLandId || !user?.primaryEmailAddress?.emailAddress) {
+    return;
+  }
+
+  try {
+    setIsSendingExternalReview(true);
+    
+    await updateLandRecordStatus(selectedLandId, 'offer');
+
+    await createActivityLog({
+      user_email: user.primaryEmailAddress.emailAddress,
+      land_record_id: selectedLandId,
+      step: null,
+      chat_id: null,
+      description: 'Pushed land record to offer stage'
+    });
+
+    setLands(lands.map(land => 
+      land.id === selectedLandId 
+        ? { ...land, status: 'offer' }
+        : land
+    ));
+    setSelectedLand(prev => prev ? { ...prev, status: 'offer' } : null);
+
+    const logsData = await getActivityLogsByLandRecord(selectedLandId);
+    setActivityLogs(logsData);
+    alert('Land record pushed to offer stage successfully!');
+  } catch (error) {
+    console.error('Error pushing to offer:', error);
+    alert('Error pushing to offer');
+  } finally {
+    setIsSendingExternalReview(false);
+  }
+};
+
+const handleShowCompletionModal = () => {
+  setShowCompletionModal(true);
+  setCompletionComment('');
+  setSelectedBrokerForOffer('');
+  setBrokerOffer('');
+  setBrokerStatusForCompletion('');
+};
+
+const handleConfirmCompletion = async () => {
+  if (!selectedLandId || !user?.primaryEmailAddress?.emailAddress) {
+    return;
+  }
+
+  try {
+    setIsSendingExternalReview(true);
+    
+    // Update land record status with comment
+    const { error: landError } = await supabase
+      .from('land_records')
+      .update({ 
+        status: 'completed',
+        comments: completionComment || null,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', selectedLandId);
+
+    if (landError) throw landError;
+
+    // Update broker offer if selected
+    if (selectedBrokerForOffer && (brokerOffer || brokerStatusForCompletion)) {
+      const updateData: any = {};
+      if (brokerOffer) updateData.last_offer = parseFloat(brokerOffer);
+      if (brokerStatusForCompletion) updateData.status = brokerStatusForCompletion;
+
+      const { error: brokerError } = await supabase
+        .from('broker_land_records')
+        .update(updateData)
+        .eq('broker_id', selectedBrokerForOffer)
+        .eq('land_record_id', selectedLandId);
+
+      if (brokerError) throw brokerError;
+    }
+
+    // Create activity log
+    let description = 'Marked land record as completed';
+    if (completionComment) description += ` with note: ${completionComment.substring(0, 50)}${completionComment.length > 50 ? '...' : ''}`;
+    if (brokerOffer) description += ` | Broker offer: ₹${brokerOffer}`;
+
+    await createActivityLog({
+      user_email: user.primaryEmailAddress.emailAddress,
+      land_record_id: selectedLandId,
+      step: null,
+      chat_id: null,
+      description
+    });
+
+    setLands(lands.map(land => 
+      land.id === selectedLandId 
+        ? { ...land, status: 'completed', comments: completionComment || null }
+        : land
+    ));
+    setSelectedLand(prev => prev ? { ...prev, status: 'completed', comments: completionComment || null } : null);
+
+    const logsData = await getActivityLogsByLandRecord(selectedLandId);
+    setActivityLogs(logsData);
+    
+    setShowCompletionModal(false);
+    alert('Land record marked as completed successfully!');
+  } catch (error) {
+    console.error('Error marking as completed:', error);
+    alert('Error marking as completed');
+  } finally {
+    setIsSendingExternalReview(false);
+    setIsUpdatingStatus(false);
+  }
+};
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -610,6 +733,16 @@ export default function LandRecordTimelinePage({ landId, showHeader = true }: La
               
               {/* Action Buttons - Smaller Size */}
               <div className="flex flex-wrap gap-2">
+                {canPushToOffer && (
+    <button
+      onClick={handlePushToOffer}
+      disabled={isSendingExternalReview}
+      className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-indigo-600 text-white rounded-md hover:bg-indigo-700 disabled:bg-gray-300 transition-colors"
+    >
+      <Send className="h-3.5 w-3.5" />
+      <span className="hidden sm:inline">Push to Offer</span>
+    </button>
+  )}
                 {canMarkCompleted && (
                   <button
                     onClick={handleMarkAsCompleted}
@@ -713,6 +846,17 @@ export default function LandRecordTimelinePage({ landId, showHeader = true }: La
           </div>
         )}
 
+{isCompleted && selectedLand?.comments && (
+  <div className="bg-green-50 border-l-4 border-green-500 p-4 rounded-lg mt-4 mb-4">
+    <div className="flex items-start gap-3">
+      <CheckCircle className="h-5 w-5 text-green-600 flex-shrink-0 mt-0.5" />
+      <div>
+        <h3 className="font-semibold text-green-900 mb-1">Completion Note</h3>
+        <p className="text-sm text-green-800 whitespace-pre-wrap">{selectedLand.comments}</p>
+      </div>
+    </div>
+  </div>
+)}
         {/* Two Column Grid - Activity Log and Chat */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
           {/* Activity Log Column */}
@@ -920,7 +1064,7 @@ export default function LandRecordTimelinePage({ landId, showHeader = true }: La
         </div>
 
         {/* Full Width Property Discussion Section - Notion-like Callout Design */}
-        {isCompleted && (
+        {(isCompleted || isOffer) && (
           <div className="bg-white rounded-lg shadow">
             {/* Header with Icon */}
             <div className="bg-gradient-to-r from-amber-50 to-orange-50 border-l-4 border-amber-500 p-4 rounded-t-lg">
@@ -1138,6 +1282,112 @@ export default function LandRecordTimelinePage({ landId, showHeader = true }: La
           </div>
         </div>
       )}
+
+      {/* Completion Modal */}
+{showCompletionModal && (
+  <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+    <div className="bg-white rounded-lg p-6 w-full max-w-lg max-h-[90vh] overflow-y-auto">
+      <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
+        <CheckCircle className="h-5 w-5 text-green-600" />
+        Mark Land Record as Completed
+      </h3>
+      
+      {/* Comment Section */}
+      <div className="mb-4">
+        <label className="block text-sm font-medium text-gray-700 mb-2">
+          Completion Note (Optional)
+        </label>
+        <textarea
+          value={completionComment}
+          onChange={(e) => setCompletionComment(e.target.value)}
+          placeholder="Add any final notes or comments about this land record..."
+          className="w-full h-24 px-3 py-2 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-green-500 focus:border-transparent resize-none"
+        />
+      </div>
+
+      {/* Broker Section - Only if brokers exist */}
+      {brokers.length > 0 && (
+        <div className="mb-4 p-4 bg-orange-50 border border-orange-200 rounded-lg">
+          <h4 className="text-sm font-semibold text-orange-900 mb-3">Broker Information (Optional)</h4>
+          
+          <div className="space-y-3">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Select Broker
+              </label>
+              <select
+                value={selectedBrokerForOffer}
+                onChange={(e) => setSelectedBrokerForOffer(e.target.value)}
+                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+              >
+                <option value="">-- Select Broker --</option>
+                {brokers.map(brokerRelation => (
+                  <option key={brokerRelation.broker_id} value={brokerRelation.broker_id}>
+                    {brokerRelation.broker?.name} - {brokerRelation.broker?.phone_number}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {selectedBrokerForOffer && (
+              <>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Last Offer Amount (₹)
+                  </label>
+                  <input
+                    type="number"
+                    value={brokerOffer}
+                    onChange={(e) => setBrokerOffer(e.target.value)}
+                    placeholder="Enter offer amount"
+                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                    step="0.01"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Broker Status
+                  </label>
+                  <select
+                    value={brokerStatusForCompletion}
+                    onChange={(e) => setBrokerStatusForCompletion(e.target.value)}
+                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                  >
+                    <option value="">-- Select Status --</option>
+                    <option value="pending">Pending</option>
+                    <option value="negotiating">Negotiating</option>
+                    <option value="deal_closed">Deal Closed</option>
+                    <option value="rejected">Rejected</option>
+                  </select>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Action Buttons */}
+      <div className="flex justify-end gap-3 pt-4 border-t">
+        <button
+          onClick={() => setShowCompletionModal(false)}
+          className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800 transition-colors"
+          disabled={isSendingExternalReview}
+        >
+          Cancel
+        </button>
+        <button
+          onClick={handleConfirmCompletion}
+          disabled={isSendingExternalReview}
+          className="flex items-center gap-2 px-4 py-2 text-sm bg-green-600 text-white rounded-md hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
+        >
+          <CheckCircle className="h-4 w-4" />
+          {isSendingExternalReview ? 'Completing...' : 'Confirm Completion'}
+        </button>
+      </div>
+    </div>
+  </div>
+)}
     </div>
   );
 }

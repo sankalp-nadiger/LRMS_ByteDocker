@@ -60,7 +60,7 @@ function EditFormsContainerInner() {
     formData,
     setFormData,
     recordId,
-     refreshStatus,           // ADD THIS
+     refreshStatus, 
   statusRefreshTrigger, 
   } = useLandRecord();
   const { toast } = useToast();
@@ -530,6 +530,7 @@ useEffect(() => {
             { id: 'review', label: 'Review', color: 'bg-indigo-300' },
             { id: 'query', label: 'Query', color: 'bg-yellow-300' },
             { id: 'review2', label: 'External Review', color: 'bg-orange-300' },
+            { id: 'offer', label: 'Offer', color: 'bg-purple-300' },
             { id: 'completed', label: 'Completed', color: 'bg-green-300' }
           ].map((status, index, array) => {
             const isActive = landRecordStatus === status.id;
@@ -583,6 +584,7 @@ useEffect(() => {
             className={`
               text-xs font-normal px-2 py-1 rounded-md border-0
               ${landRecordStatus === 'completed' ? 'bg-green-100 text-green-800' :
+                landRecordStatus === 'offer' ? 'bg-purple-100 text-purple-800' :
                 landRecordStatus === 'review2' ? 'bg-orange-100 text-orange-800' :
                 landRecordStatus === 'query' ? 'bg-yellow-100 text-yellow-800' :
                 landRecordStatus === 'review' ? 'bg-indigo-100 text-indigo-800' :

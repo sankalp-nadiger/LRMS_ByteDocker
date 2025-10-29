@@ -19,8 +19,11 @@ CREATE TABLE land_records (
     
     -- Status
     status VARCHAR(20) DEFAULT 'initiated' 
-        CHECK (status IN ('initiated', 'drafting', 'review', 'query', 'review2', 'completed')),
-    current_step INTEGER DEFAULT 1
+        CHECK (status IN ('initiated', 'drafting', 'review', 'query', 'review2', 'offer', 'completed')),
+    current_step INTEGER DEFAULT 1,
+
+    -- Comments
+    comments TEXT
 );
 
 -- Create year slabs table
@@ -151,7 +154,8 @@ CREATE TABLE brokers (
     rating DECIMAL(2,1) CHECK (rating >= 0 AND rating <= 5),
     status VARCHAR(10) NOT NULL CHECK (status IN ('active', 'inactive')),
     remarks TEXT,
-    recent_task TEXT
+    recent_task TEXT,
+    residence TEXT DEFAULT ''
 );
 
 -- Linking table: many-to-many between brokers and land_records
@@ -206,6 +210,17 @@ CREATE TABLE projects (
     land_record_ids UUID[] DEFAULT '{}'
 );
 
+CREATE TABLE owner_discussions (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  land_record_id UUID REFERENCES land_records(id) ON DELETE CASCADE,
+  user_email TEXT NOT NULL,
+  message TEXT NOT NULL,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Index for better performance
+CREATE INDEX idx_owner_discussions_land_record_id ON owner_discussions(land_record_id);
+CREATE INDEX idx_owner_discussions_created_at ON owner_discussions(created_at);
 
 -- Create indexes for better performance
 CREATE INDEX idx_land_records_district ON land_records(district);
