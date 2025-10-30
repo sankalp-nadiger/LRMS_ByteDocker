@@ -1,4 +1,4 @@
-import { useCallback, useRef } from "react";
+import { useCallback, useRef, useEffect } from "react";
 import { useLandRecord } from "@/contexts/land-record-context";
 import { LocalFormData } from "@/contexts/land-record-context";
 
@@ -9,11 +9,20 @@ export function useStepFormData(step: number) {
   const originalDataRef = useRef<Partial<LocalFormData[number]> | null>(null);
   const currentDataRef = useRef<Partial<LocalFormData[number]> | null>(null);
   const isInitializedRef = useRef(false);
+  const lastStepRef = useRef<number>(step);
+
+  // ⭐ Reset initialization when step changes
+  useEffect(() => {
+    if (lastStepRef.current !== step) {
+      isInitializedRef.current = false;
+      lastStepRef.current = step;
+    }
+  }, [step]);
 
   const getStepData = useCallback(() => {
     const stepData = formData[step] || {};
     
-    // Initialize original data reference on first access
+    // ⭐ Always reinitialize if step changed or not initialized
     if (!isInitializedRef.current) {
       originalDataRef.current = JSON.parse(JSON.stringify(stepData));
       currentDataRef.current = JSON.parse(JSON.stringify(stepData));
@@ -61,6 +70,7 @@ export function useStepFormData(step: number) {
     
     // Reset refs
     originalDataRef.current = null;
+    currentDataRef.current = null;
     isInitializedRef.current = false;
   }, [step, setFormData, setHasUnsavedChanges]);
 
@@ -68,6 +78,7 @@ export function useStepFormData(step: number) {
   const markAsSaved = useCallback(() => {
     const currentStepData = formData[step] || {};
     originalDataRef.current = JSON.parse(JSON.stringify(currentStepData));
+    currentDataRef.current = JSON.parse(JSON.stringify(currentStepData));
     setHasUnsavedChanges(step, false);
   }, [step, formData, setHasUnsavedChanges]);
 
@@ -78,9 +89,19 @@ export function useStepFormData(step: number) {
         ...prev,
         [step]: originalDataRef.current!,
       }));
+      currentDataRef.current = JSON.parse(JSON.stringify(originalDataRef.current));
       setHasUnsavedChanges(step, false);
     }
   }, [step, setFormData, setHasUnsavedChanges]);
+
+  // ⭐ Method to force reinitialization (useful when data is loaded externally)
+  const reinitialize = useCallback(() => {
+    isInitializedRef.current = false;
+    const stepData = formData[step] || {};
+    originalDataRef.current = JSON.parse(JSON.stringify(stepData));
+    currentDataRef.current = JSON.parse(JSON.stringify(stepData));
+    isInitializedRef.current = true;
+  }, [formData, step]);
 
   return { 
     getStepData, 
@@ -88,6 +109,7 @@ export function useStepFormData(step: number) {
     resetStepData, 
     markAsSaved,
     revertToOriginal,
+    reinitialize, // ⭐ Export new method
     hasUnsavedChanges: hasUnsavedChanges[step] || false
   };
 }

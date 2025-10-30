@@ -359,7 +359,7 @@ const FarmerCard = ({
 
 export default function PanipatrakStep() {
   const { yearSlabs, setCurrentStep, currentStep, landBasicInfo, mode, recordId } = useLandRecord();
-  const { getStepData, updateStepData } = useStepFormData(3);
+  const { getStepData, updateStepData, reinitialize } = useStepFormData(3);
   const [loading, setLoading] = useState(false);
   const [isInitialized, setIsInitialized] = useState(false);
   const [expandedSlabs, setExpandedSlabs] = useState<Record<string, boolean>>({});
@@ -391,6 +391,7 @@ export default function PanipatrakStep() {
     slab: YearSlab;
   };
 }>({});
+const [sameForAllYears, setSameForAllYears] = useState<number[]>([]);
 
 const getAllUniqueSlabNumbers = (slab: YearSlab) => {
   // If there are paiky/ekatrikaran entries, only show those (ignore main slab s_no)
@@ -433,177 +434,256 @@ useEffect(() => {
   console.log("Year slabs:", yearSlabs);
 }, [yearSlabs]);
 
-  // Initialize panels with default data or saved data
-  const initializePanels = (existingPanipatraks: Panipatrak[] = []) => {
-    const stepData = getStepData();
-    const savedPanipatraks = stepData?.panipatraks || [];
-    
-    const newPanels: typeof slabPanels = {};
-    const initialExpanded: Record<string, boolean> = {};
-    const initialPeriodsExpanded: Record<string, boolean> = {};
-
-    yearSlabs.forEach(slab => {
-      const periods = getYearPeriods(slab);
-      const slabPanipatraks = savedPanipatraks.filter(p => p.slabId === slab.id);
-      const hasSpecialTypes = slab.paiky || slab.ekatrikaran;
-      
-      newPanels[slab.id] = {
-        slab,
-        sameForAll: false,
-        periods: periods.map(pr => {
-          const savedData = slabPanipatraks.find(p => p.year === pr.from);
-          
-          // Initialize regular farmers if no special types
-          const regularFarmers = !hasSpecialTypes 
-  ? savedData?.farmers?.filter(f => !f.paikyNumber && !f.ekatrikaranNumber)?.map(f => ({
-      id: f.id || `farmer-${Date.now()}-${Math.random()}`,
-      name: f.name || "",
-      area: f.area || { value: 0, unit: "sq_m" }, // Changed to sq_m
-      areaType: "sq_m", // Changed to sq_m
-      sq_m: f.area?.unit === "sq_m" ? f.area.value : f.area?.value || 0,
-      acre: convertFromSquareMeters(f.area?.value || 0, "acre"),
-      guntha: convertFromSquareMeters(f.area?.value || 0, "guntha") % 40,
-      type: 'regular'
-    })) || [{
-      id: `farmer-${Date.now()}-${Math.random()}`,
-      name: "",
-      area: { value: 0, unit: "sq_m" }, // Changed to sq_m
-      areaType: "sq_m", 
-      sq_m: 0,
-      acre: 0,
-      guntha: 0,
-      type: 'regular'
-    }]
-  : [];
-
-         // Initialize paikies
-const paikies = slab.paiky 
-  ? Array.from({ length: slab.paikyCount || 0 }, (_, i) => {
-      const paikyNumber = i + 1;
-      // Get paiky entries in order and find the one matching this paiky number
-      const paikyEntries = slab.paikyEntries || [];
-      const paikyEntry = paikyEntries[i]; // Get entry by index
-      
-      const paikyFarmers = savedData?.farmers
-        ?.filter(f => f.paikyNumber === paikyNumber)
-        ?.map(f => ({
-          id: f.id || `paiky-${Date.now()}-${Math.random()}`,
-          name: f.name || "",
-          area: f.area || { value: 0, unit: "sq_m" },
-          areaType: "sq_m",
-          acre: convertFromSquareMeters(f.area?.value || 0, "acre"),
-          guntha: convertFromSquareMeters(f.area?.value || 0, "guntha") % 40,
-          sq_m: f.area?.unit === "sq_m" ? f.area.value : undefined,
-          type: 'paiky',
-          paikyNumber
-        })) || [{
-          id: `paiky-${Date.now()}-${Math.random()}`,
-          name: "",
-          area: { value: 0, unit: "sq_m" },
-          areaType: "sq_m",
-          acre: 0,
-          guntha: 0,
-          type: 'paiky',
-          paikyNumber
-        }];
-      
-      return {
-        paikyNumber,
-        farmers: paikyFarmers,
-        entry: paikyEntry // Add the entry data here
-      };
-    })
-  : [];
-
-// Initialize ekatrikarans similarly
-// Initialize ekatrikarans similarly to paikies
-const ekatrikarans = slab.ekatrikaran
-  ? Array.from({ length: slab.ekatrikaranCount || 0 }, (_, i) => {
-      const ekatrikaranNumber = i + 1;
-      // Get ekatrikaran entries in order and find the one matching this number
-      const ekatrikaranEntries = slab.ekatrikaranEntries || [];
-      const ekatrikaranEntry = ekatrikaranEntries[i]; // Get entry by index
-      
-      const ekatrikaranFarmers = savedData?.farmers
-        ?.filter(f => f.ekatrikaranNumber === ekatrikaranNumber)
-        ?.map(f => ({
-          id: f.id || `ekatrikaran-${Date.now()}-${Math.random()}`,
-          name: f.name || "",
-          area: f.area || { value: 0, unit: "sq_m" },
-          areaType: "sq_m",
-          acre: convertFromSquareMeters(f.area?.value || 0, "acre"),
-          guntha: convertFromSquareMeters(f.area?.value || 0, "guntha") % 40,
-          sq_m: f.area?.unit === "sq_m" ? f.area.value : f.area?.value || 0, // Fixed this line
-          type: 'ekatrikaran',
-          ekatrikaranNumber
-        })) || [{
-          id: `ekatrikaran-${Date.now()}-${Math.random()}`,
-          name: "",
-          area: { value: 0, unit: "sq_m" },
-          areaType: "sq_m",
-          acre: 0,
-          guntha: 0,
-          sq_m: 0, // Added this line
-          type: 'ekatrikaran',
-          ekatrikaranNumber
-        }];
-      
-      return {
-        ekatrikaranNumber,
-        farmers: ekatrikaranFarmers,
-        entry: ekatrikaranEntry // Add the entry data here
-      };
-    })
-  : [];
-          return {
-            ...pr,
-            regularFarmers,
-            paikies,
-            ekatrikarans,
-            sameAsAbove: false
-          };
+const normalizeForComparison = (panipatraks: Panipatrak[]) => {
+  if (!panipatraks) return [];
+  
+  return panipatraks
+    .filter(pani => pani.farmers?.length > 0)
+    .map(pani => ({
+      slabId: pani.slabId,
+      sNo: pani.sNo,
+      year: pani.year,
+      sameForAll: pani.sameForAll || false,
+      farmers: pani.farmers
+        .filter(f => f?.name?.trim())
+        .map(f => ({
+          name: f.name.trim(),
+          area: {
+            value: Math.round(f.area.value * 100) / 100,
+            unit: f.area.unit
+          },
+          type: f.type,
+          paikyNumber: f.paikyNumber ?? null,
+          ekatrikaranNumber: f.ekatrikaranNumber ?? null
+        }))
+        .sort((a, b) => {
+          const nameCompare = a.name.localeCompare(b.name);
+          if (nameCompare !== 0) return nameCompare;
+          return (a.type || '').localeCompare(b.type || '');
         })
-      };
-      
-      initialExpanded[slab.id] = true;
-      if (periods.length > 0) {
-        initialPeriodsExpanded[`${slab.id}-${periods[0].period}`] = true;
-      }
+    }))
+    .sort((a, b) => {
+      const slabCompare = a.slabId.localeCompare(b.slabId);
+      if (slabCompare !== 0) return slabCompare;
+      return a.year - b.year;
     });
+};
 
-    setSlabPanels(newPanels);
-    setExpandedSlabs(initialExpanded);
-    setExpandedPeriods(initialPeriodsExpanded);
-    setIsInitialized(true);
-  };
+  // Initialize panels with default data or saved data
+const initializePanels = (existingPanipatraks: Panipatrak[] = []) => {
+  const stepData = getStepData();
+  // ⭐ Use existingPanipatraks if provided, otherwise use stepData
+  const savedPanipatraks = existingPanipatraks.length > 0 ? existingPanipatraks : (stepData?.panipatraks || []);
+  
+  console.log('📦 initializePanels called with:', savedPanipatraks);
+  
+  const savedSameForAll = stepData?.same_for_all || [];
+  setSameForAllYears(savedSameForAll);
 
-// Load initial data
-  useEffect(() => {
-    const loadInitialData = async () => {
-      if (mode === 'edit' && recordId) {
-        try {
-          setLoading(true);
-          const { data, error } = await LandRecordService.getPanipatraks(recordId);
-          if (error) throw error;
+  const newPanels: typeof slabPanels = {};
+  const initialExpanded: Record<string, boolean> = {};
+  const initialPeriodsExpanded: Record<string, boolean> = {};
+
+  yearSlabs.forEach(slab => {
+    const periods = getYearPeriods(slab);
+    const slabPanipatraks = savedPanipatraks.filter(p => p.slabId === slab.id);
+    const hasSpecialTypes = slab.paiky || slab.ekatrikaran;
+    
+    console.log(`📊 Slab ${slab.id} panipatraks:`, slabPanipatraks);
+    console.log(`📊 Checking sameForAll for each:`, slabPanipatraks.map(p => ({ year: p.year, sameForAll: p.sameForAll })));
+    
+    // ⭐ Check if ALL panipatraks for this slab have sameForAll: true
+    const hasSameForAll = slabPanipatraks.length > 0 && 
+                          slabPanipatraks.every(p => p.sameForAll === true);
+    
+    console.log(`✅ Slab ${slab.id} hasSameForAll:`, hasSameForAll);
+    
+    newPanels[slab.id] = {
+      slab,
+      sameForAll: hasSameForAll,  // ⭐ Set based on saved data
+      periods: periods.map(pr => {
+        // ⭐ When sameForAll is true, use data from first year for all periods
+        const savedData = hasSameForAll 
+          ? slabPanipatraks.find(p => p.year === periods[0].from)
+          : slabPanipatraks.find(p => p.year === pr.from);
+        
+        // Initialize regular farmers if no special types
+        const regularFarmers = !hasSpecialTypes 
+          ? savedData?.farmers?.filter(f => !f.paikyNumber && !f.ekatrikaranNumber)?.map(f => ({
+              id: f.id || `farmer-${Date.now()}-${Math.random()}`,
+              name: f.name || "",
+              area: f.area || { value: 0, unit: "sq_m" },
+              areaType: "sq_m",
+              sq_m: f.area?.unit === "sq_m" ? f.area.value : f.area?.value || 0,
+              acre: convertFromSquareMeters(f.area?.value || 0, "acre"),
+              guntha: convertFromSquareMeters(f.area?.value || 0, "guntha") % 40,
+              type: 'regular'
+            })) || [{
+              id: `farmer-${Date.now()}-${Math.random()}`,
+              name: "",
+              area: { value: 0, unit: "sq_m" },
+              areaType: "sq_m", 
+              sq_m: 0,
+              acre: 0,
+              guntha: 0,
+              type: 'regular'
+            }]
+          : [];
+
+        // Initialize paikies (keeping existing logic)
+        const paikies = slab.paiky 
+          ? Array.from({ length: slab.paikyCount || 0 }, (_, i) => {
+              const paikyNumber = i + 1;
+              const paikyEntries = slab.paikyEntries || [];
+              const paikyEntry = paikyEntries[i];
+              
+              const paikyFarmers = savedData?.farmers
+                ?.filter(f => f.paikyNumber === paikyNumber)
+                ?.map(f => ({
+                  id: f.id || `paiky-${Date.now()}-${Math.random()}`,
+                  name: f.name || "",
+                  area: f.area || { value: 0, unit: "sq_m" },
+                  areaType: "sq_m",
+                  acre: convertFromSquareMeters(f.area?.value || 0, "acre"),
+                  guntha: convertFromSquareMeters(f.area?.value || 0, "guntha") % 40,
+                  sq_m: f.area?.unit === "sq_m" ? f.area.value : undefined,
+                  type: 'paiky',
+                  paikyNumber
+                })) || [{
+                  id: `paiky-${Date.now()}-${Math.random()}`,
+                  name: "",
+                  area: { value: 0, unit: "sq_m" },
+                  areaType: "sq_m",
+                  acre: 0,
+                  guntha: 0,
+                  type: 'paiky',
+                  paikyNumber
+                }];
+              
+              return {
+                paikyNumber,
+                farmers: paikyFarmers,
+                entry: paikyEntry
+              };
+            })
+          : [];
+
+        // Initialize ekatrikarans (keeping existing logic)
+        const ekatrikarans = slab.ekatrikaran
+          ? Array.from({ length: slab.ekatrikaranCount || 0 }, (_, i) => {
+              const ekatrikaranNumber = i + 1;
+              const ekatrikaranEntries = slab.ekatrikaranEntries || [];
+              const ekatrikaranEntry = ekatrikaranEntries[i];
+              
+              const ekatrikaranFarmers = savedData?.farmers
+                ?.filter(f => f.ekatrikaranNumber === ekatrikaranNumber)
+                ?.map(f => ({
+                  id: f.id || `ekatrikaran-${Date.now()}-${Math.random()}`,
+                  name: f.name || "",
+                  area: f.area || { value: 0, unit: "sq_m" },
+                  areaType: "sq_m",
+                  acre: convertFromSquareMeters(f.area?.value || 0, "acre"),
+                  guntha: convertFromSquareMeters(f.area?.value || 0, "guntha") % 40,
+                  sq_m: f.area?.unit === "sq_m" ? f.area.value : f.area?.value || 0,
+                  type: 'ekatrikaran',
+                  ekatrikaranNumber
+                })) || [{
+                  id: `ekatrikaran-${Date.now()}-${Math.random()}`,
+                  name: "",
+                  area: { value: 0, unit: "sq_m" },
+                  areaType: "sq_m",
+                  acre: 0,
+                  guntha: 0,
+                  sq_m: 0,
+                  type: 'ekatrikaran',
+                  ekatrikaranNumber
+                }];
+              
+              return {
+                ekatrikaranNumber,
+                farmers: ekatrikaranFarmers,
+                entry: ekatrikaranEntry
+              };
+            })
+          : [];
           
-          setOriginalData(data);
-          initializePanels(data || []);
-        } catch (error) {
-          toast({
-            title: "Error loading panipatraks",
-            description: error instanceof Error ? error.message : "An unknown error occurred",
-            variant: "destructive"
-          });
-        } finally {
-          setLoading(false);
-        }
-      } else {
-        initializePanels([]);
-      }
+        return {
+          ...pr,
+          regularFarmers,
+          paikies,
+          ekatrikarans,
+          sameAsAbove: false
+        };
+      })
     };
     
-    loadInitialData();
-  }, [mode, recordId, yearSlabs]);
+    initialExpanded[slab.id] = true;
+    if (periods.length > 0) {
+      initialPeriodsExpanded[`${slab.id}-${periods[0].period}`] = true;
+    }
+  });
+
+  setSlabPanels(newPanels);
+  setExpandedSlabs(initialExpanded);
+  setExpandedPeriods(initialPeriodsExpanded);
+  setIsInitialized(true);
+};
+
+// Load initial data
+useEffect(() => {
+  if (!yearSlabs?.length) {
+    setSlabPanels({});
+    setIsInitialized(false);
+    return;
+  }
+
+  const initialize = async () => {
+    if (isInitialized) return;
+    
+    console.log('🔵 Starting initialization...');
+    
+    // ⭐ Force reinitialize the step data
+    reinitialize();
+    
+    const stepData = getStepData();
+    let dataToUse: Panipatrak[] = [];
+
+    if (mode === 'edit' && recordId) {
+      try {
+        setLoading(true);
+        const { data, error } = await LandRecordService.getPanipatraks(recordId);
+        if (error) throw error;
+        dataToUse = data || [];
+        console.log('🟢 Loaded from DB:', dataToUse);
+        setOriginalData(normalizeForComparison(dataToUse));
+      } catch (error) {
+        toast({
+          title: "Error loading panipatraks",
+          description: error instanceof Error ? error.message : "An unknown error occurred",
+          variant: "destructive"
+        });
+      } finally {
+        setLoading(false);
+      }
+    } else if (stepData?.panipatraks?.length > 0) {
+      // ⭐ Use stepData for add mode (when coming back from another step)
+      dataToUse = stepData.panipatraks;
+      console.log('🟡 Using stepData:', dataToUse);
+      
+      // ⭐ Also restore sameForAllYears from stepData
+      if (stepData.same_for_all) {
+        setSameForAllYears(stepData.same_for_all);
+      }
+    }
+    
+    console.log('🔵 Initializing panels with:', dataToUse);
+    initializePanels(dataToUse);
+    setIsInitialized(true);
+    setHasChanges(false);
+  };
+
+  initialize();
+}, [yearSlabs, mode, recordId, isInitialized]);
   
 useEffect(() => {
     if (!isInitialized) return;
@@ -614,7 +694,7 @@ useEffect(() => {
     setHasChanges(currentData !== originalDataStr);
   }, [slabPanels, originalData, isInitialized]);
 
-  const getCurrentPanipatraks = (): Panipatrak[] => {
+ const getCurrentPanipatraks = (): Panipatrak[] => {
   const panipatraks: Panipatrak[] = [];
   
   Object.values(slabPanels).forEach(({ periods, slab, sameForAll }) => {
@@ -635,14 +715,15 @@ useEffect(() => {
         ...firstPeriod.ekatrikarans.flatMap(ek => ek.farmers)
       ];
 
-      // Create a panipatrak for each year in the slab range
+      // Create a panipatrak for each year in the slab range with sameForAll: true
       allYearsInSlab.forEach(year => {
         panipatraks.push({
           slabId: slab.id,
           sNo: slab.sNo,
           year: year,
+          sameForAll: true,  // ⭐ Set to true for all years when same for all is checked
           farmers: allFarmers.map(f => ({
-            id: `${f.id}-copy-${year}`, // Ensure unique IDs
+            id: `${f.id}-copy-${year}`,
             name: f.name.trim(),
             area: {
               value: f.area.value || 0,
@@ -667,6 +748,7 @@ useEffect(() => {
           slabId: slab.id,
           sNo: slab.sNo,
           year: period.from,
+          sameForAll: false,  // Set to false when not same for all
           farmers: allFarmers.map(f => ({
             id: f.id,
             name: f.name.trim(),
@@ -687,7 +769,7 @@ useEffect(() => {
 };
 
   // Update form data whenever slabPanels changes
-  useEffect(() => {
+useEffect(() => {
   if (!isInitialized) return;
 
   const panipatraks: Panipatrak[] = [];
@@ -719,8 +801,11 @@ useEffect(() => {
     });
   });
 
-  updateStepData({ panipatraks });
-}, [slabPanels, isInitialized]);
+  updateStepData({ 
+    panipatraks,
+    same_for_all: sameForAllYears  // Add this line
+  });
+}, [slabPanels, sameForAllYears, isInitialized]);  // Add sameForAllYears to dependencies
   
   const addFarmer = (slabId: string, periodIdx: number, type: 'regular' | 'paiky' | 'ekatrikaran', number?: number) => {
   setSlabPanels(prev => {
@@ -885,6 +970,21 @@ const updateFarmer = (
     const newPanels = JSON.parse(JSON.stringify(prev));
     newPanels[slabId].sameForAll = checked;
     
+      // Update sameForAllYears array
+    const startYear = newPanels[slabId].slab.startYear;
+    if (checked && startYear) {
+      setSameForAllYears(prevYears => {
+        if (!prevYears.includes(startYear)) {
+          return [...prevYears, startYear];
+        }
+        return prevYears;
+      });
+    } else if (!checked && startYear) {
+      setSameForAllYears(prevYears => 
+        prevYears.filter(year => year !== startYear)
+      );
+    }
+
     if (checked && newPanels[slabId].periods[0]) {
       const firstPeriod = newPanels[slabId].periods[0];
       
@@ -947,6 +1047,7 @@ const updateFarmer = (
     const allPanipatraks = getCurrentPanipatraks();
     console.log("All panipatraks to save:", allPanipatraks);
     console.log("Years being saved:", allPanipatraks.map(p => p.year));
+    console.log("Same for all years:", sameForAllYears);
 
     const validationErrors: string[] = [];
     
@@ -965,10 +1066,11 @@ const updateFarmer = (
       throw new Error(validationErrors.join('\n'));
     }
 
-    // Save ALL panipatraks
+    // Save ALL panipatraks with sameForAllYears array
     const { error } = await LandRecordService.savePanipatraks(
       landBasicInfo.id,
-      allPanipatraks // Pass the complete array
+      allPanipatraks,
+      sameForAllYears  // Pass the array here
     );
 
     if (error) throw error;

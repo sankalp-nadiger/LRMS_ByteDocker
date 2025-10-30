@@ -13,7 +13,8 @@ export default function AddBrokerForm() {
     rating: '',
     status: 'active',
     remarks: '',
-    recentTask: ''
+    recentTask: '',
+    residence: '' 
   });
   const router = useRouter();
   const [errors, setErrors] = useState({});
@@ -58,7 +59,8 @@ export default function AddBrokerForm() {
       rating: formData.rating ? parseFloat(formData.rating) : null,
       status: formData.status,
       remarks: formData.remarks.trim() || null,
-      recent_task: formData.recentTask.trim() || null
+      recent_task: formData.recentTask.trim() || null,
+      residence: formData.residence.trim() || null
     };
 
     // Insert into Supabase
@@ -81,7 +83,8 @@ export default function AddBrokerForm() {
       rating: '',
       status: 'active',
       remarks: '',
-      recentTask: ''
+      recentTask: '',
+      residence: ''
     });
     setErrors({});
   } catch (error) {
@@ -214,6 +217,21 @@ export default function AddBrokerForm() {
                 )}
               </div>
             </div>
+
+                {/* Residence */}
+<div className="mb-6">
+  <label className="block text-sm font-medium text-gray-700 mb-2">
+    Residence
+  </label>
+  <input
+    type="text"
+    name="residence"
+    value={formData.residence}
+    onChange={handleChange}
+    placeholder="Enter residence"
+    className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+  />
+</div>
 
             {/* Status */}
             <div className="mb-6">

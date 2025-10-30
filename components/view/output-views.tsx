@@ -8,7 +8,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
-import { Download, Eye, Filter, Calendar, AlertTriangle, Send, X, Loader2 } from "lucide-react"
+import { Download, Eye, Filter, Calendar, AlertTriangle, Send, X, Loader2, ChevronUp, ChevronDown } from "lucide-react"
 import { useLandRecord } from "@/contexts/land-record-context"
 import { convertToSquareMeters, LandRecordService } from "@/lib/supabase"
 import { useToast } from "@/hooks/use-toast"
@@ -16,6 +16,12 @@ import { useRouter } from "next/navigation"
 import { useUser } from "@clerk/nextjs"
 import { createActivityLog, createChat } from "@/lib/supabase"
 import { useUserRole } from '@/contexts/user-context'
+import { 
+  exportPanipatraksToExcel, 
+  exportPassbookToExcel, 
+  exportQueryListToExcel, 
+  exportDateWiseToExcel 
+} from "@/lib/supabase-exports"
 
 interface PassbookEntry {
   year: number
@@ -343,6 +349,7 @@ export default function OutputViews() {
   const [sendingComment, setSendingComment] = useState(false)
   const [landRecordStatus, setLandRecordStatus] = useState<string>('');
 
+  
   // Fetch land record status
 useEffect(() => {
   const fetchLandRecordStatus = async () => {
@@ -685,12 +692,16 @@ const getUniqueSNosWithTypes = () => {
   // Helper function to get status display name
   const getStatusDisplayName = (status: string): string => {
     switch (status) {
-      case 'valid': return 'Pramanik'
-      case 'invalid': return 'Radd'
-      case 'nullified': return 'Na manjoor'
-      default: return status
+      case 'valid':
+        return 'Pramaanik (પ્રમાણિત)'
+      case 'nullified':
+        return 'Na Manjoor (નામંજૂર)'
+      case 'invalid':
+        return 'Radd (રદ)'
+      default:
+        return status
     }
-  };
+  }
 
   // Helper function to get status color classes
   const getStatusColorClass = (status: string): string => {
@@ -882,6 +893,160 @@ const getUniqueSNosWithTypes = () => {
     })
   }
 }
+
+
+  const [panipatraks, setPanipatraks] = useState<any[]>([])
+  const [expandedSlabs, setExpandedSlabs] = useState<Record<string, boolean>>({})
+  const [expandedPeriods, setExpandedPeriods] = useState<Record<string, boolean>>({})
+
+  // Fetch panipatraks data
+  useEffect(() => {
+    const fetchPanipatraks = async () => {
+      if (!recordId) return;
+      
+      try {
+        const { data, error } = await LandRecordService.getPanipatraks(recordId);
+        if (error) throw error;
+        
+        setPanipatraks(data || []);
+        
+        // Initialize expanded states for slabs
+        const initialExpanded: Record<string, boolean> = {};
+        yearSlabs.forEach(slab => {
+          initialExpanded[slab.id] = true;
+        });
+        setExpandedSlabs(initialExpanded);
+        
+      } catch (error) {
+        console.error('Error fetching panipatraks:', error);
+      }
+    };
+    
+    if (recordId && yearSlabs.length > 0) {
+      fetchPanipatraks();
+    }
+  }, [recordId, yearSlabs]);
+
+  // Helper function to get year periods (same as in Panipatrak component)
+  const getYearPeriods = (startYear: number, endYear: number) => {
+    if (!startYear || !endYear) return [];
+    
+    const periods: { from: number; to: number; period: string }[] = [];
+    for (let y = startYear; y < endYear; y++) {
+      periods.push({ 
+        from: y, 
+        to: y + 1, 
+        period: `${y}-${y + 1}` 
+      });
+    }
+    return periods;
+  };
+
+  // Export functions for each tab
+const handleExportPanipatraks = async () => {
+  if (!landBasicInfo) {
+    toast({
+      title: 'Error',
+      description: 'Land basic information is required',
+      variant: 'destructive'
+    });
+    return;
+  }
+
+  try {
+    // Pass the actual panipatraks data and yearSlabs to the export function
+    await exportPanipatraksToExcel(panipatraks, landBasicInfo, yearSlabs);
+    toast({
+      title: 'Success',
+      description: 'Panipatraks exported successfully',
+    });
+  } catch (error) {
+    console.error('Error exporting panipatraks:', error);
+    toast({
+      title: 'Error',
+      description: 'Failed to export panipatraks',
+      variant: 'destructive'
+    });
+  }
+};
+
+  const handleExportPassbook = async () => {
+  if (!landBasicInfo) {
+    toast({
+      title: 'Error',
+      description: 'Land basic information is required',
+      variant: 'destructive'
+    });
+    return;
+  }
+
+  try {
+    await exportPassbookToExcel(passbookData, landBasicInfo);
+    toast({
+      title: 'Success',
+      description: 'Passbook exported successfully',
+    });
+  } catch (error) {
+    console.error('Error exporting passbook:', error);
+    toast({
+      title: 'Error',
+      description: 'Failed to export passbook',
+      variant: 'destructive'
+    });
+  }
+};
+
+const handleExportQueryList = async () => {
+  if (!landBasicInfo) {
+    toast({
+      title: 'Error',
+      description: 'Land basic information is required',
+      variant: 'destructive'
+    });
+    return;
+  }
+
+  try {
+    await exportQueryListToExcel(filteredNondhs, landBasicInfo);
+    toast({
+      title: 'Success',
+      description: 'Query list exported successfully',
+    });
+  } catch (error) {
+    console.error('Error exporting query list:', error);
+    toast({
+      title: 'Error',
+      description: 'Failed to export query list',
+      variant: 'destructive'
+    });
+  }
+};
+
+const handleExportDateWise = async () => {
+  if (!landBasicInfo) {
+    toast({
+      title: 'Error',
+      description: 'Land basic information is required',
+      variant: 'destructive'
+    });
+    return;
+  }
+
+  try {
+    await exportDateWiseToExcel(dateWiseFilteredData, landBasicInfo);
+    toast({
+      title: 'Success',
+      description: 'Date-wise data exported successfully',
+    });
+  } catch (error) {
+    console.error('Error exporting date-wise data:', error);
+    toast({
+      title: 'Error',
+      description: 'Failed to export date-wise data',
+      variant: 'destructive'
+    });
+  }
+};
 
   const generateFilteredNondhs = () => {
   console.log('generateFilteredNondhs - nondhs available:', nondhs.length);
@@ -1347,35 +1512,35 @@ const getUniqueSNosWithTypes = () => {
                 <Download className="w-4 h-4" />
                 {isGeneratingPDF ? 'Generating...' : 'Download Integrated Document'}
               </Button>
-              <Button
-                onClick={exportToExcel}
-                className="flex items-center gap-2 w-full sm:w-auto"
-                variant="outline"
-              >
-                <Download className="w-4 h-4" />
-                Export Output
-              </Button>
             </div>
           </div>
 
           <Tabs defaultValue="nondh-table" className="w-full">
-            <TabsList className="grid w-full grid-cols-4 mb-4">
+            <TabsList className="grid w-full grid-cols-5 mb-4">
               <TabsTrigger value="nondh-table" className="text-xs sm:text-sm">Nondh Table</TabsTrigger>
               <TabsTrigger value="query-list" className="text-xs sm:text-sm">Query List</TabsTrigger>
+              <TabsTrigger value="panipatraks" className="text-xs sm:text-sm">Panipatraks</TabsTrigger>
               <TabsTrigger value="passbook" className="text-xs sm:text-sm">Passbook</TabsTrigger>
               <TabsTrigger value="date-wise" className="text-xs sm:text-sm">Date-wise</TabsTrigger>
             </TabsList>
 
-            <TabsContent value="nondh-table" className="space-y-4">
-  <div className="flex flex-col gap-4">
-    <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-4">
-      <h3 className="text-base sm:text-lg font-semibold">
-        All Nondhs ({nondhDetails.length})
-      </h3>
-      
-      <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
-        <SNoFilterComponent />
-      </div>
+           <TabsContent value="nondh-table" className="space-y-4">
+  <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-4">
+    <h3 className="text-base sm:text-lg font-semibold">
+      All Nondhs ({nondhDetails.length})
+    </h3>
+    
+    <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+      <SNoFilterComponent />
+      <Button
+        onClick={exportToExcel}
+        className="flex items-center gap-2 w-full sm:w-auto"
+        variant="outline"
+        size="sm"
+      >
+        <Download className="w-4 h-4" />
+        Export Nondh Table
+      </Button>
     </div>
   </div>
 
@@ -1407,132 +1572,253 @@ const getUniqueSNosWithTypes = () => {
       );
     }
 
-  return (
-    <>
-      {/* Desktop Table */}
-      <div className="hidden lg:block rounded-md border overflow-x-auto">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Nondh No.</TableHead>
-              <TableHead>Nondh Doc</TableHead>
-              <TableHead>Nondh Type</TableHead>
-              <TableHead>Hukam Type</TableHead>
-              <TableHead>Vigat</TableHead>
-              <TableHead>Affected S.No</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead>Reason</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {allNondhsData.map((nondh, index) => (
-              <TableRow key={index}>
-                <TableCell>{nondh.nondhNumber}</TableCell>
-                <TableCell className={!nondh.nondhDocUrl ? 'bg-red-100' : ''}>
-                  {nondh.nondhDocUrl ? (
-                    <Button 
-                      size="sm" 
-                      variant="outline"
-                      onClick={() => viewDocument(nondh.nondhDocUrl!, `Nondh ${nondh.nondhNumber} Document`)}
-                    >
-                      <Eye className="w-4 h-4 mr-1" />
-                      View Document
-                    </Button>
-                  ) : (
-                    <span className="text-red-600 font-medium">N/A</span>
-                  )}
-                </TableCell>
-                <TableCell>{nondh.nondhType}</TableCell>
-                <TableCell>{nondh.type === 'Hukam' ? (nondh.hukamType || '-') : '-'}</TableCell>
-                <TableCell className="max-w-xs truncate">{nondh.vigat || "-"}</TableCell>
-                <TableCell>{nondh.affectedSNos}</TableCell>
-                <TableCell>
-                  <span className={`px-2 py-1 rounded text-xs ${getStatusColorClass(nondh.status)}`}>
-                    {getStatusDisplayName(nondh.status)}
-                  </span>
-                </TableCell>
-                <TableCell className="max-w-xs">
-                  {nondh.invalidReason ? (
-                    <span className="text-red-600 text-sm">{nondh.invalidReason}</span>
-                  ) : (
-                    "-"
-                  )}
-                </TableCell>
+    return (
+      <>
+        {/* Desktop Table */}
+        <div className="hidden lg:block rounded-md border overflow-x-auto">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="w-20">Nondh No.</TableHead>
+                <TableHead className="w-24">Nondh Doc</TableHead>
+                <TableHead className="w-24">Nondh Type</TableHead>
+                <TableHead className="w-20">Hukam Type</TableHead>
+                <TableHead className="w-[300px]">Vigat</TableHead>
+                <TableHead className="w-32">Affected S.No</TableHead>
+                <TableHead className="w-28 text-center">Status</TableHead>
+                <TableHead className="w-48">Reason</TableHead>
               </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </div>
-
-      {/* Mobile Cards */}
-      <div className="lg:hidden space-y-3">
-        {allNondhsData.map((nondh, index) => (
-          <Card key={index} className="p-4">
-            <div className="space-y-3">
-              <div className="flex justify-between items-start">
-                <div className="space-y-1">
-                  <div className="font-medium text-sm">Nondh #{nondh.nondhNumber}</div>
-                  <div className="text-muted-foreground text-xs">
-  Type: {nondh.nondhType}
-  {nondh.nondhType === 'Hukam' && nondh.hukamType && nondh.hukamType !== '-' && (
-    <span> - {nondh.hukamType}</span>
-  )}
-</div>
-                </div>
-                <Badge className={`text-xs ${getStatusColorClass(nondh.status)}`}>
-                  {getStatusDisplayName(nondh.status)}
-                </Badge>
-              </div>
-              
-              <div className="grid grid-cols-2 gap-2 text-sm">
-                <div>
-                  <span className="text-muted-foreground">Nondh Doc:</span>
-                  <div className={`font-medium p-1 rounded ${!nondh.nondhDocUrl ? 'bg-red-100' : ''}`}>
+            </TableHeader>
+            <TableBody>
+              {allNondhsData.map((nondh, index) => (
+                <TableRow key={index}>
+                  <TableCell className="font-medium">{nondh.nondhNumber}</TableCell>
+                  <TableCell className={!nondh.nondhDocUrl ? 'bg-red-50' : ''}>
                     {nondh.nondhDocUrl ? (
                       <Button 
                         size="sm" 
-                        variant="outline" 
-                        className="h-6 px-2"
+                        variant="outline"
+                        className="h-8 px-2"
                         onClick={() => viewDocument(nondh.nondhDocUrl!, `Nondh ${nondh.nondhNumber} Document`)}
                       >
-                        <Eye className="w-3 h-3 mr-1" />
+                        <Eye className="w-4 h-4 mr-1" />
                         View
                       </Button>
                     ) : (
-                      <span className="text-red-600 text-xs">N/A</span>
+                      <span className="text-red-600 font-medium">N/A</span>
                     )}
+                  </TableCell>
+                  <TableCell>{nondh.nondhType}</TableCell>
+                  <TableCell className="text-sm">
+                    {nondh.type === 'Hukam' ? (nondh.hukamType || '-') : '-'}
+                  </TableCell>
+                  <TableCell>
+                    <div className="max-h-32 overflow-y-auto">
+                      <div className="text-sm whitespace-pre-wrap break-words min-h-[20px]">
+                        {nondh.vigat || "-"}
+                      </div>
+                    </div>
+                  </TableCell>
+                  <TableCell className="text-sm">{nondh.affectedSNos}</TableCell>
+                 <TableCell>
+  <div className="flex justify-center">
+    <span className={`inline-block px-3 py-1 rounded text-sm text-center min-w-[100px] ${getStatusColorClass(nondh.status)}`}>
+      {getStatusDisplayName(nondh.status)}
+    </span>
+  </div>
+</TableCell>
+                  <TableCell>
+                    <div className="max-h-32 overflow-y-auto">
+                      <div className="text-sm whitespace-pre-wrap break-words min-h-[20px]">
+                        {nondh.invalidReason ? (
+                          <span className="text-red-600">{nondh.invalidReason}</span>
+                        ) : (
+                          "-"
+                        )}
+                      </div>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+
+        {/* Mobile Cards */}
+        <div className="lg:hidden space-y-3">
+          {allNondhsData.map((nondh, index) => (
+            <Card key={index} className="p-4">
+              <div className="space-y-3">
+                <div className="flex justify-between items-start">
+                  <div className="space-y-1">
+                    <div className="font-medium text-sm">Nondh #{nondh.nondhNumber}</div>
+                    <div className="text-muted-foreground text-xs">
+                      Type: {nondh.nondhType}
+                      {nondh.nondhType === 'Hukam' && nondh.hukamType && nondh.hukamType !== '-' && (
+                        <span> - {nondh.hukamType}</span>
+                      )}
+                    </div>
+                  </div>
+                  <Badge className={`text-sm px-3 py-1 min-w-[100px] text-center ${getStatusColorClass(nondh.status)}`}>
+  {getStatusDisplayName(nondh.status)}
+</Badge>
+                </div>
+                
+                <div className="grid grid-cols-2 gap-2 text-sm">
+                  <div>
+                    <span className="text-muted-foreground">Nondh Doc:</span>
+                    <div className={`font-medium p-1 rounded ${!nondh.nondhDocUrl ? 'bg-red-100' : ''}`}>
+                      {nondh.nondhDocUrl ? (
+                        <Button 
+                          size="sm" 
+                          variant="outline" 
+                          className="h-6 px-2"
+                          onClick={() => viewDocument(nondh.nondhDocUrl!, `Nondh ${nondh.nondhNumber} Document`)}
+                        >
+                          <Eye className="w-3 h-3 mr-1" />
+                          View
+                        </Button>
+                      ) : (
+                        <span className="text-red-600 text-xs">N/A</span>
+                      )}
+                    </div>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground">Affected S.No:</span>
+                    <div className="font-medium text-xs">{nondh.affectedSNos}</div>
                   </div>
                 </div>
-                <div>
-                  <span className="text-muted-foreground">Affected S.No:</span>
-                  <div className="font-medium text-xs">{nondh.affectedSNos}</div>
-                </div>
+                
+                {nondh.vigat && nondh.vigat !== '-' && (
+                  <div className="space-y-1">
+                    <span className="text-muted-foreground text-sm">Vigat:</span>
+                    <div className="max-h-24 overflow-y-auto border rounded p-2 bg-gray-50">
+                      <div className="text-sm whitespace-pre-wrap break-words">
+                        {nondh.vigat}
+                      </div>
+                    </div>
+                  </div>
+                )}
+                
+                {nondh.invalidReason && (
+                  <div className="space-y-1">
+                    <span className="text-muted-foreground text-sm">Reason:</span>
+                    <div className="max-h-24 overflow-y-auto border rounded p-2 bg-red-50">
+                      <div className="text-sm whitespace-pre-wrap break-words text-red-600">
+                        {nondh.invalidReason}
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
-              
-              {nondh.vigat && nondh.vigat !== '-' && (
-                <div className="space-y-1">
-                  <span className="text-muted-foreground text-sm">Vigat:</span>
-                  <div className="text-sm font-medium truncate">{nondh.vigat}</div>
-                </div>
-              )}
-              
-              {nondh.invalidReason && (
-                <div className="space-y-1">
-                  <span className="text-muted-foreground text-sm">Reason:</span>
-                  <div className="text-sm font-medium text-red-600">{nondh.invalidReason}</div>
-                </div>
-              )}
-            </div>
-          </Card>
-        ))}
-      </div>
-    </>
-  );
-})()}
+            </Card>
+          ))}
+        </div>
+      </>
+    );
+  })()}
+</TabsContent>
+
+  {/* New Panipatraks Tab */}
+<TabsContent value="panipatraks" className="space-y-4">
+  <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-4">
+    <h3 className="text-base sm:text-lg font-semibold">
+      Panipatraks - Farmer Allotments
+    </h3>
+    <Button
+      onClick={handleExportPanipatraks}
+      className="flex items-center gap-2 w-full sm:w-auto"
+      variant="outline"
+      size="sm"
+    >
+      <Download className="w-4 h-4" />
+      Export Panipatraks
+    </Button>
+  </div>
+
+  {yearSlabs.length === 0 ? (
+    <div className="text-center py-8">
+      <p className="text-gray-500 text-sm">No year slabs found</p>
+    </div>
+  ) : (
+    <div className="rounded-md border overflow-x-auto">
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead className="w-1/4">Year(s)</TableHead>
+            <TableHead className="w-1/2">Farmer Name</TableHead>
+            <TableHead className="w-1/4">Area Alloted</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {yearSlabs.map((slab) => {
+            const slabPanipatraks = panipatraks.filter(p => p.slabId === slab.id);
+            const periods = getYearPeriods(slab.startYear, slab.endYear);
+            const hasSameForAll = slabPanipatraks.length > 0 && 
+                                 slabPanipatraks.every(p => p.sameForAll === true);
+
+            if (hasSameForAll) {
+              // Single entry for all years
+              const firstPeriodData = slabPanipatraks.find(p => p.year === periods[0]?.from);
+              if (!firstPeriodData?.farmers?.length) return null;
+
+              return firstPeriodData.farmers.map((farmer: any, farmerIndex: number) => {
+                const areaInSqM = farmer.area.unit === "sq_m" 
+                  ? farmer.area.value 
+                  : convertToSquareMeters(farmer.area.value, "sq_m");
+                
+                const acres = convertToSquareMeters(areaInSqM, "acre");
+                const guntha = convertToSquareMeters(areaInSqM, "guntha") % 40;
+
+                return (
+                  <TableRow key={`${slab.id}-all-${farmerIndex}`}>
+                    <TableCell className="font-medium">
+                      {farmerIndex === 0 ? `${slab.startYear}-${slab.endYear}` : ''}
+                    </TableCell>
+                    <TableCell>{farmer.name}</TableCell>
+                    <TableCell>
+                      {Math.round(areaInSqM * 100) / 100} sq.m ({Math.floor(acres)} acre {Math.round(guntha)} guntha)
+                    </TableCell>
+                  </TableRow>
+                );
+              });
+            } else {
+              // Separate entries for each period
+              return periods.flatMap((period) => {
+                const periodData = slabPanipatraks.find(p => p.year === period.from);
+                if (!periodData?.farmers?.length) return null;
+
+                return periodData.farmers.map((farmer: any, farmerIndex: number) => {
+                  const areaInSqM = farmer.area.unit === "sq_m" 
+                    ? farmer.area.value 
+                    : convertToSquareMeters(farmer.area.value, "sq_m");
+                  
+                  const acres = convertToSquareMeters(areaInSqM, "acre");
+                  const guntha = convertToSquareMeters(areaInSqM, "guntha") % 40;
+
+                  return (
+                    <TableRow key={`${slab.id}-${period.period}-${farmerIndex}`}>
+                      <TableCell className="font-medium">
+                        {farmerIndex === 0 ? period.period : ''}
+                      </TableCell>
+                      <TableCell>{farmer.name}</TableCell>
+                      <TableCell>
+                        {Math.round(areaInSqM * 100) / 100} sq.m ({Math.floor(acres)} acre {Math.round(guntha)} guntha)
+                      </TableCell>
+                    </TableRow>
+                  );
+                });
+              });
+            }
+          })}
+        </TableBody>
+      </Table>
+    </div>
+  )}
 </TabsContent>
 
           <TabsContent value="query-list" className="space-y-4">
-            <div className="flex flex-col gap-4">
+            {/* <div className="flex flex-col gap-4"> */}
               <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-4">
                 <h3 className="text-base sm:text-lg font-semibold">
                   Nondhs Marked for Output ({filteredNondhs.length})
@@ -1540,9 +1826,18 @@ const getUniqueSNosWithTypes = () => {
                 
                 <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
                   <SNoFilterComponent />
+                  <Button
+                    onClick={handleExportQueryList}
+                    className="flex items-center gap-2 w-full sm:w-auto"
+                    variant="outline"
+                    size="sm"
+                  >
+                    <Download className="w-4 h-4" />
+                    Export Query List
+                  </Button>
                 </div>
               </div>
-            </div>
+
 
             {filteredNondhs.length === 0 ? (
               <div className="text-center py-8">
@@ -1609,7 +1904,6 @@ const getUniqueSNosWithTypes = () => {
           </TabsContent>
 
           <TabsContent value="passbook" className="space-y-4">
-            <div className="flex flex-col gap-4">
               <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-4">
                 <h3 className="text-base sm:text-lg font-semibold">
                   Land Ownership Records ({passbookData.length})
@@ -1617,9 +1911,18 @@ const getUniqueSNosWithTypes = () => {
                 
                 <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
                   <SNoFilterComponent />
+                   <Button
+                    onClick={handleExportPassbook}
+                    className="flex items-center gap-2 w-full sm:w-auto"
+                    variant="outline"
+                    size="sm"
+                  >
+                    <Download className="w-4 h-4" />
+                    Export Passbook
+                  </Button>
                 </div>
               </div>
-            </div>
+
 
             {passbookData.length === 0 ? (
               <div className="text-center py-8">
@@ -1682,6 +1985,15 @@ const getUniqueSNosWithTypes = () => {
                       onChange={(e) => setDateFilter(e.target.value)}
                       className="w-full sm:w-40"
                     />
+                    <Button
+                    onClick={handleExportDateWise}
+                    className="flex items-center gap-2 w-full sm:w-auto"
+                    variant="outline"
+                    size="sm"
+                  >
+                    <Download className="w-4 h-4" />
+                    Export Date-wise
+                  </Button>
                   </div>
                 </div>
               </div>

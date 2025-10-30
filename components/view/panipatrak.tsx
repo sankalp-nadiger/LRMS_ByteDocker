@@ -157,8 +157,7 @@ export default function Panipatrak() {
     return <div className="p-10">No year slabs found</div>;
   }
 
-  const getAllUniqueSlabNumbers = (slab: YearSlab) => {
-    // If there are paiky/ekatrikaran entries, only show those (ignore main slab s_no)
+  const getAllUniqueSlabNumbers = (slab: any) => {
     if ((slab.paiky || slab.ekatrikaran) && 
         ((slab.paikyEntries && slab.paikyEntries.length > 0) || 
          (slab.ekatrikaranEntries && slab.ekatrikaranEntries.length > 0))) {
@@ -168,7 +167,6 @@ export default function Panipatrak() {
         ...(slab.ekatrikaranEntries || [])
       ];
       
-      // Get unique combinations from entries only
       const uniqueEntries = allEntries.reduce((acc: any, entry: any) => {
         const key = `${entry.sNoType}-${entry.sNo}`;
         if (!acc[key]) {
@@ -182,7 +180,6 @@ export default function Panipatrak() {
       
       return Object.values(uniqueEntries);
     } else {
-      // No paiky/ekatrikaran entries, show main slab s_no
       return [{
         sNo: slab.sNo,
         sNoType: slab.sNoType
@@ -201,6 +198,10 @@ export default function Panipatrak() {
           const periods = getYearPeriods(slab.startYear, slab.endYear);
           const hasPaiky = slab.paiky;
           const hasEkatrikaran = slab.ekatrikaran;
+          
+          // ⭐ Check if this slab has sameForAll set to true
+          const hasSameForAll = slabPanipatraks.length > 0 && 
+                                slabPanipatraks.every(p => p.sameForAll === true);
 
           return (
             <Card key={slab.id} className="mb-6 border-2 border-gray-200">
@@ -210,30 +211,34 @@ export default function Panipatrak() {
                     <h2 className="font-bold text-lg">
                       Slab {slab.sNo}: {slab.startYear} - {slab.endYear}
                     </h2>
-                   <p className="text-sm text-gray-600">
-    {(() => {
-      const allNumbers = getAllUniqueSlabNumbers(slab);
-      if (allNumbers.length === 1) {
-        // Only main slab number
-        const entry = allNumbers[0];
-        return `${entry.sNoType === 'block_no' ? 'Block No' : 
-                 entry.sNoType === 're_survey_no' ? 'Re-survey No' : 'Survey No'}: ${entry.sNo}`;
-      } else {
-        // Multiple numbers - group by type
-        const grouped = allNumbers.reduce((acc: any, entry: any) => {
-          const typeLabel = entry.sNoType === 'block_no' ? 'Block' : 
-                           entry.sNoType === 're_survey_no' ? 'Re-survey' : 'Survey';
-          if (!acc[typeLabel]) acc[typeLabel] = [];
-          acc[typeLabel].push(entry.sNo);
-          return acc;
-        }, {});
-        
-        return Object.entries(grouped)
-          .map(([type, numbers]: [string, any]) => `${type} No${numbers.length > 1 ? 's' : ''}: ${numbers.join(', ')}`)
-          .join(' | ');
-      }
-    })()}
-  </p>
+                    <p className="text-sm text-gray-600">
+                      {(() => {
+                        const allNumbers = getAllUniqueSlabNumbers(slab);
+                        if (allNumbers.length === 1) {
+                          const entry = allNumbers[0];
+                          return `${entry.sNoType === 'block_no' ? 'Block No' : 
+                                   entry.sNoType === 're_survey_no' ? 'Re-survey No' : 'Survey No'}: ${entry.sNo}`;
+                        } else {
+                          const grouped = allNumbers.reduce((acc: any, entry: any) => {
+                            const typeLabel = entry.sNoType === 'block_no' ? 'Block' : 
+                                             entry.sNoType === 're_survey_no' ? 'Re-survey' : 'Survey';
+                            if (!acc[typeLabel]) acc[typeLabel] = [];
+                            acc[typeLabel].push(entry.sNo);
+                            return acc;
+                          }, {});
+                          
+                          return Object.entries(grouped)
+                            .map(([type, numbers]: [string, any]) => `${type} No${numbers.length > 1 ? 's' : ''}: ${numbers.join(', ')}`)
+                            .join(' | ');
+                        }
+                      })()}
+                    </p>
+                    {/* ⭐ Display "Same for all years" badge */}
+                    {hasSameForAll && (
+                      <p className="text-sm text-blue-600 font-medium mt-1">
+                        ✓ Same for all years
+                      </p>
+                    )}
                   </div>
                   <Button
                     variant="ghost"
@@ -251,88 +256,175 @@ export default function Panipatrak() {
               
               {expandedSlabs[slab.id] && (
                 <CardContent className="space-y-6 p-4">
-                  {periods.map((period) => {
-                    const periodData = slabPanipatraks.find(p => p.year === period.from);
-                    
-                    if (!periodData) return null;
+                  {hasSameForAll ? (
+                    // ⭐ When sameForAll is true, show only the first period's data
+                    (() => {
+                      const firstPeriodData = slabPanipatraks.find(p => p.year === periods[0].from);
+                      
+                      if (!firstPeriodData) return null;
 
-                    return (
-                      <Card key={`${slab.id}-${period.period}`} className="shadow-sm border">
-                        <div 
-                          className="flex items-center justify-between p-4 cursor-pointer hover:bg-gray-50"
-                          onClick={() => togglePeriod(slab.id, period.period)}
-                        >
-                          <div>
-                            <h3 className="font-semibold text-md">
-                              {period.period}
-                            </h3>
-                            <p className="text-sm text-gray-500">
-                              {periodData.farmers.length} farmer(s)
-                            </p>
-                          </div>
-                          <Button
-                            variant="ghost"
-                            size="sm"
+                      return (
+                        <Card className="shadow-sm border">
+                          <div 
+                            className="flex items-center justify-between p-4 cursor-pointer hover:bg-gray-50"
+                            onClick={() => togglePeriod(slab.id, 'all-years')}
                           >
-                            {expandedPeriods[`${slab.id}-${period.period}`] ? (
-                              <ChevronUp className="h-4 w-4" />
-                            ) : (
-                              <ChevronDown className="h-4 w-4" />
-                            )}
-                          </Button>
-                        </div>
-                        
-                        {expandedPeriods[`${slab.id}-${period.period}`] && (
-                          <div className="p-4 space-y-4">
-                            {hasPaiky && (
-                              <div className="space-y-4">
-                                <h3 className="font-medium text-lg">Paikies</h3>
-                                {periodData.farmers
-                                  .filter(f => f.type === 'paiky')
-                                  .map((farmer, idx) => (
-                                    <FarmerCardView
-                                      key={farmer.id}
-                                      farmer={farmer}
-                                      farmerIdx={idx}
-                                      isSpecialType={true}
-                                    />
-                                  ))}
-                              </div>
-                            )}
-                            
-                            {hasEkatrikaran && (
-                              <div className="space-y-4">
-                                <h3 className="font-medium text-lg">Ekatrikarans</h3>
-                                {periodData.farmers
-                                  .filter(f => f.type === 'ekatrikaran')
-                                  .map((farmer, idx) => (
-                                    <FarmerCardView
-                                      key={farmer.id}
-                                      farmer={farmer}
-                                      farmerIdx={idx}
-                                      isSpecialType={true}
-                                    />
-                                  ))}
-                              </div>
-                            )}
-                            
-                            {!hasPaiky && !hasEkatrikaran && (
-                              <div className="space-y-4">
-                                <h3 className="font-medium text-lg">Farmers</h3>
-                                {periodData.farmers.map((farmer, idx) => (
-                                  <FarmerCardView
-                                    key={farmer.id}
-                                    farmer={farmer}
-                                    farmerIdx={idx}
-                                  />
-                                ))}
-                              </div>
-                            )}
+                            <div>
+                              <h3 className="font-semibold text-md">
+                                All Years ({slab.startYear}-{slab.endYear})
+                              </h3>
+                              <p className="text-sm text-gray-500">
+                                {firstPeriodData.farmers.length} farmer(s)
+                              </p>
+                            </div>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                            >
+                              {expandedPeriods[`${slab.id}-all-years`] ? (
+                                <ChevronUp className="h-4 w-4" />
+                              ) : (
+                                <ChevronDown className="h-4 w-4" />
+                              )}
+                            </Button>
                           </div>
-                        )}
-                      </Card>
-                    );
-                  })}
+                          
+                          {expandedPeriods[`${slab.id}-all-years`] && (
+                            <div className="p-4 space-y-4">
+                              {hasPaiky && (
+                                <div className="space-y-4">
+                                  <h3 className="font-medium text-lg">Paikies</h3>
+                                  {firstPeriodData.farmers
+                                    .filter(f => f.type === 'paiky')
+                                    .map((farmer, idx) => (
+                                      <FarmerCardView
+                                        key={farmer.id}
+                                        farmer={farmer}
+                                        farmerIdx={idx}
+                                        isSpecialType={true}
+                                      />
+                                    ))}
+                                </div>
+                              )}
+                              
+                              {hasEkatrikaran && (
+                                <div className="space-y-4">
+                                  <h3 className="font-medium text-lg">Ekatrikarans</h3>
+                                  {firstPeriodData.farmers
+                                    .filter(f => f.type === 'ekatrikaran')
+                                    .map((farmer, idx) => (
+                                      <FarmerCardView
+                                        key={farmer.id}
+                                        farmer={farmer}
+                                        farmerIdx={idx}
+                                        isSpecialType={true}
+                                      />
+                                    ))}
+                                </div>
+                              )}
+                              
+                              {!hasPaiky && !hasEkatrikaran && (
+                                <div className="space-y-4">
+                                  <h3 className="font-medium text-lg">Farmers</h3>
+                                  {firstPeriodData.farmers.map((farmer, idx) => (
+                                    <FarmerCardView
+                                      key={farmer.id}
+                                      farmer={farmer}
+                                      farmerIdx={idx}
+                                    />
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </Card>
+                      );
+                    })()
+                  ) : (
+                    // ⭐ Normal case - show all periods separately
+                    periods.map((period) => {
+                      const periodData = slabPanipatraks.find(p => p.year === period.from);
+                      
+                      if (!periodData) return null;
+
+                      return (
+                        <Card key={`${slab.id}-${period.period}`} className="shadow-sm border">
+                          <div 
+                            className="flex items-center justify-between p-4 cursor-pointer hover:bg-gray-50"
+                            onClick={() => togglePeriod(slab.id, period.period)}
+                          >
+                            <div>
+                              <h3 className="font-semibold text-md">
+                                {period.period}
+                              </h3>
+                              <p className="text-sm text-gray-500">
+                                {periodData.farmers.length} farmer(s)
+                              </p>
+                            </div>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                            >
+                              {expandedPeriods[`${slab.id}-${period.period}`] ? (
+                                <ChevronUp className="h-4 w-4" />
+                              ) : (
+                                <ChevronDown className="h-4 w-4" />
+                              )}
+                            </Button>
+                          </div>
+                          
+                          {expandedPeriods[`${slab.id}-${period.period}`] && (
+                            <div className="p-4 space-y-4">
+                              {hasPaiky && (
+                                <div className="space-y-4">
+                                  <h3 className="font-medium text-lg">Paikies</h3>
+                                  {periodData.farmers
+                                    .filter(f => f.type === 'paiky')
+                                    .map((farmer, idx) => (
+                                      <FarmerCardView
+                                        key={farmer.id}
+                                        farmer={farmer}
+                                        farmerIdx={idx}
+                                        isSpecialType={true}
+                                      />
+                                    ))}
+                                </div>
+                              )}
+                              
+                              {hasEkatrikaran && (
+                                <div className="space-y-4">
+                                  <h3 className="font-medium text-lg">Ekatrikarans</h3>
+                                  {periodData.farmers
+                                    .filter(f => f.type === 'ekatrikaran')
+                                    .map((farmer, idx) => (
+                                      <FarmerCardView
+                                        key={farmer.id}
+                                        farmer={farmer}
+                                        farmerIdx={idx}
+                                        isSpecialType={true}
+                                      />
+                                    ))}
+                                </div>
+                              )}
+                              
+                              {!hasPaiky && !hasEkatrikaran && (
+                                <div className="space-y-4">
+                                  <h3 className="font-medium text-lg">Farmers</h3>
+                                  {periodData.farmers.map((farmer, idx) => (
+                                    <FarmerCardView
+                                      key={farmer.id}
+                                      farmer={farmer}
+                                      farmerIdx={idx}
+                                    />
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </Card>
+                      );
+                    })
+                  )}
                 </CardContent>
               )}
             </Card>

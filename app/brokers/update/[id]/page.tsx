@@ -59,6 +59,7 @@ interface BrokerData {
   status: string;
   recent_task: string;
   remarks: string;
+  residence: string;
 }
 
 export default function BrokerUpdatePage({ 
@@ -85,6 +86,7 @@ export default function BrokerUpdatePage({
     status: "active",
     recent_task: "",
     remarks: "",
+    residence: "",
   });
   
   const [landRecords, setLandRecords] = useState<BrokerLandRecord[]>([]);
@@ -172,6 +174,7 @@ export default function BrokerUpdatePage({
           status: brokerData.status,
           recent_task: brokerData.recent_task,
           remarks: brokerData.remarks,
+          residence: brokerData.residence, 
           updated_at: new Date().toISOString(),
         })
         .eq("id", resolvedParams.id);
@@ -341,7 +344,15 @@ export default function BrokerUpdatePage({
                 placeholder="0.0 - 5.0"
               />
             </div>
-
+      <div className="space-y-2">
+  <Label htmlFor="residence">Residence</Label>
+  <Input
+    id="residence"
+    value={brokerData.residence}
+    onChange={(e) => handleBrokerChange("residence", e.target.value)}
+    placeholder="Enter residence"
+  />
+</div>
             <div className="space-y-2">
               <Label htmlFor="status">Status *</Label>
               <Select

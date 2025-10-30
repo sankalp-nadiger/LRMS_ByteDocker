@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
@@ -8,7 +8,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
-import { Download, Eye, Filter, Calendar, AlertTriangle, Send, X, Loader2 } from "lucide-react"
+import { Download, Eye, Filter, Calendar, AlertTriangle, Send, X, Loader2, ChevronUp, ChevronDown } from "lucide-react"
 import { useLandRecord } from "@/contexts/land-record-context"
 import { convertToSquareMeters, LandRecordService } from "@/lib/supabase"
 import { useToast } from "@/hooks/use-toast"
@@ -16,7 +16,12 @@ import { useRouter } from "next/navigation"
 import { useUser } from "@clerk/nextjs"
 import { createActivityLog, createChat } from "@/lib/supabase"
 import { useUserRole } from '@/contexts/user-context'
-import { useRef } from "react"
+import { 
+  exportPanipatraksToExcel, 
+  exportPassbookToExcel, 
+  exportQueryListToExcel, 
+  exportDateWiseToExcel 
+} from "@/lib/supabase-exports"
 
 interface PassbookEntry {
   year: number
@@ -53,6 +58,7 @@ interface Nondh {
   affected_s_nos: any[]
   nondh_doc_url?: string
 }
+
 interface User {
   id: string;
   email: string;
@@ -64,7 +70,7 @@ interface User {
 interface CommentModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSubmit: (message: string, recipients: string[], isPushForReview?: boolean) => Promise<void>;
+ onSubmit: (message: string, recipients: string[], isReviewComplete?: boolean) => Promise<void>;
   loading?: boolean;
   step: number;
   userRole: string;
@@ -78,14 +84,17 @@ const CommentModal = ({ isOpen, onClose, onSubmit, loading = false, step, userRo
   const [selectedRecipients, setSelectedRecipients] = useState<string[]>([]);
   const [cursorPosition, setCursorPosition] = useState(0);
   const [users, setUsers] = useState<User[]>([]);
-  const [isPushForReview, setIsPushForReview] = useState(false);
+  const [isReviewComplete, setIsReviewComplete] = useState(false);
   const { user } = useUser();
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const modalTitle = userRole === 'executioner'
-    ? `Send Message to Manager/Reviewer - Step ${step}`
-    : `Send Message to Executioner/Reviewer - Step ${step}`;
-
+  // Determine the modal title based on user role
+  const modalTitle = userRole === 'reviewer'
+  ? `Send Message to Manager/Executioner - Step ${step}`
+  : userRole === 'executioner'
+  ? `Send Message to Manager/Reviewer - Step ${step}`
+  : `Send Message to Executioner/Reviewer - Step ${step}`;
+  // Fetch users when modal opens
   useEffect(() => {
     if (isOpen) {
       const fetchUsers = async () => {
@@ -99,12 +108,18 @@ const CommentModal = ({ isOpen, onClose, onSubmit, loading = false, step, userRo
         }
       };
       fetchUsers();
+      // Reset state when modal opens
       setMessage('');
       setSelectedRecipients([]);
       setShowMentionDropdown(false);
-      setIsPushForReview(landRecordStatus === 'review');
+      // Set isReviewComplete based on status
+    if (userRole === 'reviewer') {
+      setIsReviewComplete(landRecordStatus === 'review');
+    } else {
+      setIsReviewComplete(false);
     }
-  }, [isOpen, landRecordStatus]);
+    }
+}, [isOpen, landRecordStatus, userRole]); 
 
   const handleMessageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value;
@@ -113,6 +128,7 @@ const CommentModal = ({ isOpen, onClose, onSubmit, loading = false, step, userRo
     setMessage(value);
     setCursorPosition(position);
 
+    // Check for @ mention
     const textBeforeCursor = value.substring(0, position);
     const lastAtIndex = textBeforeCursor.lastIndexOf('@');
     
@@ -166,10 +182,10 @@ const CommentModal = ({ isOpen, onClose, onSubmit, loading = false, step, userRo
 
   const handleSubmit = async () => {
     if (!message.trim()) return;
-    await onSubmit(message, selectedRecipients, isPushForReview);
+    await onSubmit(message, selectedRecipients, isReviewComplete);
     setMessage('');
     setSelectedRecipients([]);
-    setIsPushForReview(false);
+    setIsReviewComplete(false);
   };
 
   if (!isOpen) return null;
@@ -191,6 +207,7 @@ const CommentModal = ({ isOpen, onClose, onSubmit, loading = false, step, userRo
           </div>
         </CardHeader>
         <CardContent className="space-y-4 overflow-y-auto flex-1 p-6 pt-4">
+          {/* Selected Recipients Pills */}
           {selectedRecipients.length > 0 && (
             <div className="flex flex-wrap gap-2 mb-2">
               {selectedRecipients.map(email => {
@@ -210,6 +227,7 @@ const CommentModal = ({ isOpen, onClose, onSubmit, loading = false, step, userRo
             </div>
           )}
 
+          {/* Message Input */}
           <div className="space-y-2">
             <Label htmlFor="comment-message">Message</Label>
             <div className="relative">
@@ -219,14 +237,15 @@ const CommentModal = ({ isOpen, onClose, onSubmit, loading = false, step, userRo
                 type="text"
                 value={message}
                 onChange={handleMessageChange}
-                placeholder={userRole === 'executioner'
-                  ? "Type @ to mention someone or send to all managers/reviewers..."
-                  : "Type @ to mention someone or send to all executioners/reviewers..."}
+                placeholder={userRole === 'reviewer' 
+                  ? "Type @ to mention someone or send to all managers/executioners..." 
+                  : "Type @ to mention someone or send to all executioners..."}
                 disabled={loading}
                 onKeyPress={(e) => e.key === 'Enter' && !showMentionDropdown && handleSubmit()}
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               />
 
+              {/* Mention Dropdown */}
               {showMentionDropdown && filteredUsers.length > 0 && (
                 <div className="absolute top-full left-0 mt-1 w-full bg-white border border-gray-300 rounded-lg shadow-lg max-h-48 overflow-y-auto z-20">
                   {filteredUsers.map(u => (
@@ -248,26 +267,40 @@ const CommentModal = ({ isOpen, onClose, onSubmit, loading = false, step, userRo
               )}
             </div>
             <p className="text-xs text-gray-500">
-              Type @ to mention specific users, or send to all {userRole === 'executioner' ? 'managers/reviewers' : 'executioners/reviewers'}
+              Type @ to mention specific users, or send to all {userRole === 'reviewer' ? 'managers/executioners' : 'executioners'}
             </p>
           </div>
-
-          {(userRole === 'manager' || userRole === 'admin' || userRole === 'executioner') && (
-            <div className="flex items-center gap-2 p-3 bg-green-50 border border-green-200 rounded-lg">
-              <input
-                type="checkbox"
-                id="push-review"
-                checked={isPushForReview}
-                disabled={landRecordStatus === 'review'}
-                onChange={(e) => setIsPushForReview(e.target.checked)}
-                className="w-4 h-4 text-green-600 rounded focus:ring-green-500"
-              />
-              <Label htmlFor="push-review" className="text-sm font-medium cursor-pointer">
-                Push for Review {landRecordStatus === 'review' && '(Already in Review)'}
-              </Label>
-            </div>
-          )}
-          
+         {userRole === 'reviewer' ? (
+  landRecordStatus === 'review' && ( // ADD THIS CONDITION
+    <div className="flex items-center gap-2 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+      <input
+        type="checkbox"
+        id="review-complete"
+        checked={isReviewComplete}
+        onChange={(e) => setIsReviewComplete(e.target.checked)}
+        className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
+      />
+      <Label htmlFor="review-complete" className="text-sm font-medium cursor-pointer">
+        Mark Review as Complete
+      </Label>
+    </div>
+  )
+) : (userRole === 'manager' || userRole === 'admin' || userRole === 'executioner') && (
+  landRecordStatus !== 'review' && ( // ADD THIS CONDITION
+    <div className="flex items-center gap-2 p-3 bg-green-50 border border-green-200 rounded-lg">
+      <input
+        type="checkbox"
+        id="push-review"
+        checked={isReviewComplete}
+        onChange={(e) => setIsReviewComplete(e.target.checked)}
+        className="w-4 h-4 text-green-600 rounded focus:ring-green-500"
+      />
+      <Label htmlFor="push-review" className="text-sm font-medium cursor-pointer">
+        Push for Review
+      </Label>
+    </div>
+  )
+)}
           <div className="flex gap-2 pt-4">
             <Button
               variant="outline"
@@ -297,13 +330,12 @@ const CommentModal = ({ isOpen, onClose, onSubmit, loading = false, step, userRo
 };
 
 export default function OutputViews() {
-  const { landBasicInfo, recordId, yearSlabs } = useLandRecord()
+  const { landBasicInfo, recordId, yearSlabs, refreshStatus } = useLandRecord()
   const { toast } = useToast()
   const router = useRouter()
   const { user } = useUser()
   const { role } = useUserRole()
-const [showCommentModal, setShowCommentModal] = useState(false)
-const [sendingComment, setSendingComment] = useState(false)
+  
   const [passbookData, setPassbookData] = useState<PassbookEntry[]>([])
   const [nondhDetails, setNondhDetails] = useState<NondhDetail[]>([])
   const [nondhs, setNondhs] = useState<Nondh[]>([])
@@ -312,8 +344,32 @@ const [sendingComment, setSendingComment] = useState(false)
   const [dateFilter, setDateFilter] = useState("")
   const [sNoFilter, setSNoFilter] = useState("")
   const [loading, setLoading] = useState(true)
-const [isGeneratingPDF, setIsGeneratingPDF] = useState(false)
-const [landRecordStatus, setLandRecordStatus] = useState<string>('');
+  const [isGeneratingPDF, setIsGeneratingPDF] = useState(false)
+  const [showCommentModal, setShowCommentModal] = useState(false)
+  const [sendingComment, setSendingComment] = useState(false)
+  const [landRecordStatus, setLandRecordStatus] = useState<string>('');
+
+  
+  // Fetch land record status
+useEffect(() => {
+  const fetchLandRecordStatus = async () => {
+    if (!recordId) return;
+    
+    try {
+      const { data, error } = await LandRecordService.getLandRecord(recordId);
+      if (error) throw error;
+      if (data) {
+        setLandRecordStatus(data.status || '');
+      }
+    } catch (error) {
+      console.error('Error fetching land record status:', error);
+    }
+  };
+
+  if (recordId) {
+    fetchLandRecordStatus();
+  }
+}, [recordId]);
 
  // Helper function to format affected S.Nos properly
 const formatAffectedSNos = (affectedSNos: any, availableSNos?: Array<{value: string, type: string, label: string}>): string => {
@@ -379,26 +435,86 @@ const formatAffectedSNos = (affectedSNos: any, availableSNos?: Array<{value: str
     return typeof affectedSNos === 'string' ? affectedSNos : JSON.stringify(affectedSNos);
   }
 };
-// Fetch land record status
-useEffect(() => {
-  const fetchLandRecordStatus = async () => {
-    if (!recordId) return;
-    
-    try {
-      const { data, error } = await LandRecordService.getLandRecord(recordId);
-      if (error) throw error;
-      if (data) {
-        setLandRecordStatus(data.status || '');
-      }
-    } catch (error) {
-      console.error('Error fetching land record status:', error);
-    }
-  };
 
-  if (recordId) {
-    fetchLandRecordStatus();
+  // Handle comment submission
+const handleSendComment = async (message: string, recipients: string[], isReviewComplete: boolean = false) => {
+  if (!recordId || !user?.primaryEmailAddress?.emailAddress) return;
+
+  try {
+    setSendingComment(true);
+
+    const toEmails = recipients.length > 0 ? recipients : null;
+
+    const chatData = await createChat({
+      from_email: user.primaryEmailAddress.emailAddress,
+      to_email: toEmails,
+      message: message,
+      land_record_id: recordId,
+      step: 6
+    });
+
+    const recipientText = toEmails 
+      ? `to ${toEmails.length} recipient(s)` 
+      : role === 'reviewer' 
+        ? 'to all managers/executioners'
+        : 'to all executioners/reviewers';
+
+    await createActivityLog({
+      user_email: user.primaryEmailAddress.emailAddress,
+      land_record_id: recordId,
+      step: 6,
+      chat_id: chatData.id,
+      description: `Sent message ${recipientText}: ${message}`
+    });
+
+    // Handle review completion or push for review
+    if (isReviewComplete) {
+      if (role === 'reviewer') {
+        // Reviewer marking review as complete
+        await LandRecordService.updateLandRecord(recordId, { status: 'query' });
+        
+        await createActivityLog({
+          user_email: user.primaryEmailAddress.emailAddress,
+          land_record_id: recordId,
+          step: 6,
+          chat_id: null,
+          description: 'Reviewer marked the review as complete.'
+        });
+
+        setLandRecordStatus('query'); // UPDATE LOCAL STATE
+        toast({ title: "Review marked as complete." });
+        refreshStatus();
+      } else {
+        // Manager/Admin/Executioner pushing for review
+        await LandRecordService.updateLandRecord(recordId, { status: 'review' });
+        
+        await createActivityLog({
+          user_email: user.primaryEmailAddress.emailAddress,
+          land_record_id: recordId,
+          step: 6,
+          chat_id: null,
+          description: `${role.charAt(0).toUpperCase() + role.slice(1)} pushed the record for review. Status changed to Review.`
+        });
+
+        setLandRecordStatus('review'); // UPDATE LOCAL STATE
+        toast({ title: "Record pushed for review. Status changed to Review." });
+        refreshStatus();
+      }
+    } else {
+      toast({ title: "Message sent successfully" });
+    }
+
+    setShowCommentModal(false);
+  } catch (error) {
+    console.error('Error sending comment:', error);
+    toast({ 
+      title: "Error sending message", 
+      variant: "destructive" 
+    });
+  } finally {
+    setSendingComment(false);
   }
-}, [recordId]);
+};
 
 const handleDownloadIntegratedDocument = async () => {
 
@@ -576,12 +692,16 @@ const getUniqueSNosWithTypes = () => {
   // Helper function to get status display name
   const getStatusDisplayName = (status: string): string => {
     switch (status) {
-      case 'valid': return 'Pramanik'
-      case 'invalid': return 'Radd'
-      case 'nullified': return 'Na manjoor'
-      default: return status
+      case 'valid':
+        return 'Pramaanik (પ્રમાણિત)'
+      case 'nullified':
+        return 'Na Manjoor (નામંજૂર)'
+      case 'invalid':
+        return 'Radd (રદ)'
+      default:
+        return status
     }
-  };
+  }
 
   // Helper function to get status color classes
   const getStatusColorClass = (status: string): string => {
@@ -773,6 +893,160 @@ const getUniqueSNosWithTypes = () => {
     })
   }
 }
+
+
+  const [panipatraks, setPanipatraks] = useState<any[]>([])
+  const [expandedSlabs, setExpandedSlabs] = useState<Record<string, boolean>>({})
+  const [expandedPeriods, setExpandedPeriods] = useState<Record<string, boolean>>({})
+
+  // Fetch panipatraks data
+  useEffect(() => {
+    const fetchPanipatraks = async () => {
+      if (!recordId) return;
+      
+      try {
+        const { data, error } = await LandRecordService.getPanipatraks(recordId);
+        if (error) throw error;
+        
+        setPanipatraks(data || []);
+        
+        // Initialize expanded states for slabs
+        const initialExpanded: Record<string, boolean> = {};
+        yearSlabs.forEach(slab => {
+          initialExpanded[slab.id] = true;
+        });
+        setExpandedSlabs(initialExpanded);
+        
+      } catch (error) {
+        console.error('Error fetching panipatraks:', error);
+      }
+    };
+    
+    if (recordId && yearSlabs.length > 0) {
+      fetchPanipatraks();
+    }
+  }, [recordId, yearSlabs]);
+
+  // Helper function to get year periods (same as in Panipatrak component)
+  const getYearPeriods = (startYear: number, endYear: number) => {
+    if (!startYear || !endYear) return [];
+    
+    const periods: { from: number; to: number; period: string }[] = [];
+    for (let y = startYear; y < endYear; y++) {
+      periods.push({ 
+        from: y, 
+        to: y + 1, 
+        period: `${y}-${y + 1}` 
+      });
+    }
+    return periods;
+  };
+
+  // Export functions for each tab
+const handleExportPanipatraks = async () => {
+  if (!landBasicInfo) {
+    toast({
+      title: 'Error',
+      description: 'Land basic information is required',
+      variant: 'destructive'
+    });
+    return;
+  }
+
+  try {
+    // Pass the actual panipatraks data and yearSlabs to the export function
+    await exportPanipatraksToExcel(panipatraks, landBasicInfo, yearSlabs);
+    toast({
+      title: 'Success',
+      description: 'Panipatraks exported successfully',
+    });
+  } catch (error) {
+    console.error('Error exporting panipatraks:', error);
+    toast({
+      title: 'Error',
+      description: 'Failed to export panipatraks',
+      variant: 'destructive'
+    });
+  }
+};
+
+  const handleExportPassbook = async () => {
+  if (!landBasicInfo) {
+    toast({
+      title: 'Error',
+      description: 'Land basic information is required',
+      variant: 'destructive'
+    });
+    return;
+  }
+
+  try {
+    await exportPassbookToExcel(passbookData, landBasicInfo);
+    toast({
+      title: 'Success',
+      description: 'Passbook exported successfully',
+    });
+  } catch (error) {
+    console.error('Error exporting passbook:', error);
+    toast({
+      title: 'Error',
+      description: 'Failed to export passbook',
+      variant: 'destructive'
+    });
+  }
+};
+
+const handleExportQueryList = async () => {
+  if (!landBasicInfo) {
+    toast({
+      title: 'Error',
+      description: 'Land basic information is required',
+      variant: 'destructive'
+    });
+    return;
+  }
+
+  try {
+    await exportQueryListToExcel(filteredNondhs, landBasicInfo);
+    toast({
+      title: 'Success',
+      description: 'Query list exported successfully',
+    });
+  } catch (error) {
+    console.error('Error exporting query list:', error);
+    toast({
+      title: 'Error',
+      description: 'Failed to export query list',
+      variant: 'destructive'
+    });
+  }
+};
+
+const handleExportDateWise = async () => {
+  if (!landBasicInfo) {
+    toast({
+      title: 'Error',
+      description: 'Land basic information is required',
+      variant: 'destructive'
+    });
+    return;
+  }
+
+  try {
+    await exportDateWiseToExcel(dateWiseFilteredData, landBasicInfo);
+    toast({
+      title: 'Success',
+      description: 'Date-wise data exported successfully',
+    });
+  } catch (error) {
+    console.error('Error exporting date-wise data:', error);
+    toast({
+      title: 'Error',
+      description: 'Failed to export date-wise data',
+      variant: 'destructive'
+    });
+  }
+};
 
   const generateFilteredNondhs = () => {
   console.log('generateFilteredNondhs - nondhs available:', nondhs.length);
@@ -1065,92 +1339,9 @@ const getUniqueSNosWithTypes = () => {
   }
 }
 
-const handleSendComment = async (message: string, recipients: string[], isPushForReview: boolean = false) => {
-  if (!recordId || !user?.primaryEmailAddress?.emailAddress) return;
-
-  try {
-    setSendingComment(true);
-
-    const toEmails = recipients.length > 0 ? recipients : null;
-
-    const chatData = await createChat({
-      from_email: user.primaryEmailAddress.emailAddress,
-      to_email: toEmails,
-      message: message,
-      land_record_id: recordId,
-      step: 6
-    });
-
-    const recipientText = toEmails 
-      ? `to ${toEmails.length} recipient(s)` 
-      : role === 'executioner'
-        ? 'to all managers/reviewers'
-        : 'to all executioners/reviewers';
-
-    await createActivityLog({
-      user_email: user.primaryEmailAddress.emailAddress,
-      land_record_id: recordId,
-      step: 6,
-      chat_id: chatData.id,
-      description: `Sent message ${recipientText}: ${message}`
-    });
-
-    if (isPushForReview) {
-      await LandRecordService.updateLandRecord(recordId, { status: 'review' });
-      
-      await createActivityLog({
-        user_email: user.primaryEmailAddress.emailAddress,
-        land_record_id: recordId,
-        step: 6,
-        chat_id: null,
-        description: `${role?.charAt(0).toUpperCase()}${role?.slice(1)} pushed the record for review. Status changed to Review.`
-      });
-
-      toast({ title: "Record pushed for review. Status changed to Review." });
-    } else {
-      toast({ title: "Message sent successfully" });
-    }
-
-    setShowCommentModal(false);
-  } catch (error) {
-    console.error('Error sending comment:', error);
-    toast({ 
-      title: "Error sending message", 
-      variant: "destructive" 
-    });
-  } finally {
-    setSendingComment(false);
-  }
-};
-
-  const handleCompleteProcess = async () => {
-    try {
-      // Update land record status to "review"
-      const { error } = await LandRecordService.updateLandRecord(recordId, {
-        status: "review"
-      });
-
-      if (error) throw error;
-
-      // Create activity log
-      await createActivityLog({
-        user_email: user?.primaryEmailAddress?.emailAddress || "",
-        land_record_id: recordId,
-        step: 6, // Output views is step 4
-        chat_id: null,
-        description: "Sent for review from output view"
-      });
-
-      toast({ title: "Process completed. Record sent for review!" });
-      router.push('/land-master');
-    } catch (err) {
-      console.error('Error completing process:', err);
-      toast({ 
-        title: "Error",
-        description: "Failed to complete process. Please try again.",
-        variant: "destructive"
-      });
-    }
+  const handleCompleteProcess = () => {
+    toast({ title: "Land records fetched successfully!" })
+    router.push('/land-master')
   }
 
   const renderQueryListCard = (nondh: NondhDetail, index: number) => {    
@@ -1303,49 +1494,53 @@ const handleSendComment = async (message: string, recipients: string[], isPushFo
   }
 
   return (
-    <Card className="w-full max-w-none">
-      <CardHeader>
-        <CardTitle className="text-lg sm:text-xl">Step 6: Output Views & Reports</CardTitle>
-      </CardHeader>
-      <CardContent className="p-4 sm:p-6">
-  <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4 mb-6">
-    <h2 className="text-lg font-semibold">Reports & Documents</h2>
-    <Button
-      onClick={handleDownloadIntegratedDocument}
-      className="flex items-center gap-2 w-full sm:w-auto"
-      variant="outline"
-      disabled={isGeneratingPDF}
-    >
-      <Download className="w-4 h-4" />
-      {isGeneratingPDF ? 'Generating...' : 'Download Integrated Document'}
-    </Button>
-    <Button
-  onClick={exportToExcel}
-  className="flex items-center gap-2 w-full sm:w-auto"
-  variant="outline"
->
-  <Download className="w-4 h-4" />
-  Export Output
-</Button>
-  </div>
-  <Tabs defaultValue="nondh-table" className="w-full">
-          <TabsList className="grid w-full grid-cols-4 mb-4">
-  <TabsTrigger value="nondh-table" className="text-xs sm:text-sm">Nondh Table</TabsTrigger>
-  <TabsTrigger value="query-list" className="text-xs sm:text-sm">Query List</TabsTrigger>
-  <TabsTrigger value="passbook" className="text-xs sm:text-sm">Passbook</TabsTrigger>
-  <TabsTrigger value="date-wise" className="text-xs sm:text-sm">Date-wise</TabsTrigger>
-</TabsList>
+    <>
+      <Card className="w-full max-w-none">
+        <CardHeader>
+          <CardTitle className="text-lg sm:text-xl">Step 6: Output Views & Reports</CardTitle>
+        </CardHeader>
+        <CardContent className="p-4 sm:p-6">
+          <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4 mb-6">
+            <h2 className="text-lg font-semibold">Reports & Documents</h2>
+            <div className="flex flex-col sm:flex-row gap-2">
+              <Button
+                onClick={handleDownloadIntegratedDocument}
+                className="flex items-center gap-2 w-full sm:w-auto"
+                variant="outline"
+                disabled={isGeneratingPDF}
+              >
+                <Download className="w-4 h-4" />
+                {isGeneratingPDF ? 'Generating...' : 'Download Integrated Document'}
+              </Button>
+            </div>
+          </div>
 
-<TabsContent value="nondh-table" className="space-y-4">
-  <div className="flex flex-col gap-4">
-    <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-4">
-      <h3 className="text-base sm:text-lg font-semibold">
-        All Nondhs ({nondhDetails.length})
-      </h3>
-      
-      <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
-        <SNoFilterComponent />
-      </div>
+          <Tabs defaultValue="nondh-table" className="w-full">
+            <TabsList className="grid w-full grid-cols-5 mb-4">
+              <TabsTrigger value="nondh-table" className="text-xs sm:text-sm">Nondh Table</TabsTrigger>
+              <TabsTrigger value="query-list" className="text-xs sm:text-sm">Query List</TabsTrigger>
+              <TabsTrigger value="panipatraks" className="text-xs sm:text-sm">Panipatraks</TabsTrigger>
+              <TabsTrigger value="passbook" className="text-xs sm:text-sm">Passbook</TabsTrigger>
+              <TabsTrigger value="date-wise" className="text-xs sm:text-sm">Date-wise</TabsTrigger>
+            </TabsList>
+
+           <TabsContent value="nondh-table" className="space-y-4">
+  <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-4">
+    <h3 className="text-base sm:text-lg font-semibold">
+      All Nondhs ({nondhDetails.length})
+    </h3>
+    
+    <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+      <SNoFilterComponent />
+      <Button
+        onClick={exportToExcel}
+        className="flex items-center gap-2 w-full sm:w-auto"
+        variant="outline"
+        size="sm"
+      >
+        <Download className="w-4 h-4" />
+        Export Nondh Table
+      </Button>
     </div>
   </div>
 
@@ -1377,132 +1572,253 @@ const handleSendComment = async (message: string, recipients: string[], isPushFo
       );
     }
 
-  return (
-    <>
-      {/* Desktop Table */}
-      <div className="hidden lg:block rounded-md border overflow-x-auto">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Nondh No.</TableHead>
-              <TableHead>Nondh Doc</TableHead>
-              <TableHead>Nondh Type</TableHead>
-              <TableHead>Hukam Type</TableHead>
-              <TableHead>Vigat</TableHead>
-              <TableHead>Affected S.No</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead>Reason</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {allNondhsData.map((nondh, index) => (
-              <TableRow key={index}>
-                <TableCell>{nondh.nondhNumber}</TableCell>
-                <TableCell className={!nondh.nondhDocUrl ? 'bg-red-100' : ''}>
-                  {nondh.nondhDocUrl ? (
-                    <Button 
-                      size="sm" 
-                      variant="outline"
-                      onClick={() => viewDocument(nondh.nondhDocUrl!, `Nondh ${nondh.nondhNumber} Document`)}
-                    >
-                      <Eye className="w-4 h-4 mr-1" />
-                      View Document
-                    </Button>
-                  ) : (
-                    <span className="text-red-600 font-medium">N/A</span>
-                  )}
-                </TableCell>
-                <TableCell>{nondh.nondhType}</TableCell>
-                <TableCell>{nondh.type === 'Hukam' ? (nondh.hukamType || '-') : '-'}</TableCell>
-                <TableCell className="max-w-xs truncate">{nondh.vigat || "-"}</TableCell>
-                <TableCell>{nondh.affectedSNos}</TableCell>
-                <TableCell>
-                  <span className={`px-2 py-1 rounded text-xs ${getStatusColorClass(nondh.status)}`}>
-                    {getStatusDisplayName(nondh.status)}
-                  </span>
-                </TableCell>
-                <TableCell className="max-w-xs">
-                  {nondh.invalidReason ? (
-                    <span className="text-red-600 text-sm">{nondh.invalidReason}</span>
-                  ) : (
-                    "-"
-                  )}
-                </TableCell>
+    return (
+      <>
+        {/* Desktop Table */}
+        <div className="hidden lg:block rounded-md border overflow-x-auto">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="w-20">Nondh No.</TableHead>
+                <TableHead className="w-24">Nondh Doc</TableHead>
+                <TableHead className="w-24">Nondh Type</TableHead>
+                <TableHead className="w-20">Hukam Type</TableHead>
+                <TableHead className="w-[300px]">Vigat</TableHead>
+                <TableHead className="w-32">Affected S.No</TableHead>
+                <TableHead className="w-28 text-center">Status</TableHead>
+                <TableHead className="w-48">Reason</TableHead>
               </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </div>
-
-      {/* Mobile Cards */}
-      <div className="lg:hidden space-y-3">
-        {allNondhsData.map((nondh, index) => (
-          <Card key={index} className="p-4">
-            <div className="space-y-3">
-              <div className="flex justify-between items-start">
-                <div className="space-y-1">
-                  <div className="font-medium text-sm">Nondh #{nondh.nondhNumber}</div>
-                  <div className="text-muted-foreground text-xs">
-  Type: {nondh.nondhType}
-  {nondh.nondhType === 'Hukam' && nondh.hukamType && nondh.hukamType !== '-' && (
-    <span> - {nondh.hukamType}</span>
-  )}
-</div>
-                </div>
-                <Badge className={`text-xs ${getStatusColorClass(nondh.status)}`}>
-                  {getStatusDisplayName(nondh.status)}
-                </Badge>
-              </div>
-              
-              <div className="grid grid-cols-2 gap-2 text-sm">
-                <div>
-                  <span className="text-muted-foreground">Nondh Doc:</span>
-                  <div className={`font-medium p-1 rounded ${!nondh.nondhDocUrl ? 'bg-red-100' : ''}`}>
+            </TableHeader>
+            <TableBody>
+              {allNondhsData.map((nondh, index) => (
+                <TableRow key={index}>
+                  <TableCell className="font-medium">{nondh.nondhNumber}</TableCell>
+                  <TableCell className={!nondh.nondhDocUrl ? 'bg-red-50' : ''}>
                     {nondh.nondhDocUrl ? (
                       <Button 
                         size="sm" 
-                        variant="outline" 
-                        className="h-6 px-2"
+                        variant="outline"
+                        className="h-8 px-2"
                         onClick={() => viewDocument(nondh.nondhDocUrl!, `Nondh ${nondh.nondhNumber} Document`)}
                       >
-                        <Eye className="w-3 h-3 mr-1" />
+                        <Eye className="w-4 h-4 mr-1" />
                         View
                       </Button>
                     ) : (
-                      <span className="text-red-600 text-xs">N/A</span>
+                      <span className="text-red-600 font-medium">N/A</span>
                     )}
+                  </TableCell>
+                  <TableCell>{nondh.nondhType}</TableCell>
+                  <TableCell className="text-sm">
+                    {nondh.type === 'Hukam' ? (nondh.hukamType || '-') : '-'}
+                  </TableCell>
+                  <TableCell>
+                    <div className="max-h-32 overflow-y-auto">
+                      <div className="text-sm whitespace-pre-wrap break-words min-h-[20px]">
+                        {nondh.vigat || "-"}
+                      </div>
+                    </div>
+                  </TableCell>
+                  <TableCell className="text-sm">{nondh.affectedSNos}</TableCell>
+                 <TableCell>
+  <div className="flex justify-center">
+    <span className={`inline-block px-3 py-1 rounded text-sm text-center min-w-[100px] ${getStatusColorClass(nondh.status)}`}>
+      {getStatusDisplayName(nondh.status)}
+    </span>
+  </div>
+</TableCell>
+                  <TableCell>
+                    <div className="max-h-32 overflow-y-auto">
+                      <div className="text-sm whitespace-pre-wrap break-words min-h-[20px]">
+                        {nondh.invalidReason ? (
+                          <span className="text-red-600">{nondh.invalidReason}</span>
+                        ) : (
+                          "-"
+                        )}
+                      </div>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+
+        {/* Mobile Cards */}
+        <div className="lg:hidden space-y-3">
+          {allNondhsData.map((nondh, index) => (
+            <Card key={index} className="p-4">
+              <div className="space-y-3">
+                <div className="flex justify-between items-start">
+                  <div className="space-y-1">
+                    <div className="font-medium text-sm">Nondh #{nondh.nondhNumber}</div>
+                    <div className="text-muted-foreground text-xs">
+                      Type: {nondh.nondhType}
+                      {nondh.nondhType === 'Hukam' && nondh.hukamType && nondh.hukamType !== '-' && (
+                        <span> - {nondh.hukamType}</span>
+                      )}
+                    </div>
+                  </div>
+                  <Badge className={`text-sm px-3 py-1 min-w-[100px] text-center ${getStatusColorClass(nondh.status)}`}>
+  {getStatusDisplayName(nondh.status)}
+</Badge>
+                </div>
+                
+                <div className="grid grid-cols-2 gap-2 text-sm">
+                  <div>
+                    <span className="text-muted-foreground">Nondh Doc:</span>
+                    <div className={`font-medium p-1 rounded ${!nondh.nondhDocUrl ? 'bg-red-100' : ''}`}>
+                      {nondh.nondhDocUrl ? (
+                        <Button 
+                          size="sm" 
+                          variant="outline" 
+                          className="h-6 px-2"
+                          onClick={() => viewDocument(nondh.nondhDocUrl!, `Nondh ${nondh.nondhNumber} Document`)}
+                        >
+                          <Eye className="w-3 h-3 mr-1" />
+                          View
+                        </Button>
+                      ) : (
+                        <span className="text-red-600 text-xs">N/A</span>
+                      )}
+                    </div>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground">Affected S.No:</span>
+                    <div className="font-medium text-xs">{nondh.affectedSNos}</div>
                   </div>
                 </div>
-                <div>
-                  <span className="text-muted-foreground">Affected S.No:</span>
-                  <div className="font-medium text-xs">{nondh.affectedSNos}</div>
-                </div>
+                
+                {nondh.vigat && nondh.vigat !== '-' && (
+                  <div className="space-y-1">
+                    <span className="text-muted-foreground text-sm">Vigat:</span>
+                    <div className="max-h-24 overflow-y-auto border rounded p-2 bg-gray-50">
+                      <div className="text-sm whitespace-pre-wrap break-words">
+                        {nondh.vigat}
+                      </div>
+                    </div>
+                  </div>
+                )}
+                
+                {nondh.invalidReason && (
+                  <div className="space-y-1">
+                    <span className="text-muted-foreground text-sm">Reason:</span>
+                    <div className="max-h-24 overflow-y-auto border rounded p-2 bg-red-50">
+                      <div className="text-sm whitespace-pre-wrap break-words text-red-600">
+                        {nondh.invalidReason}
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
-              
-              {nondh.vigat && nondh.vigat !== '-' && (
-                <div className="space-y-1">
-                  <span className="text-muted-foreground text-sm">Vigat:</span>
-                  <div className="text-sm font-medium truncate">{nondh.vigat}</div>
-                </div>
-              )}
-              
-              {nondh.invalidReason && (
-                <div className="space-y-1">
-                  <span className="text-muted-foreground text-sm">Reason:</span>
-                  <div className="text-sm font-medium text-red-600">{nondh.invalidReason}</div>
-                </div>
-              )}
-            </div>
-          </Card>
-        ))}
-      </div>
-    </>
-  );
-})()}
+            </Card>
+          ))}
+        </div>
+      </>
+    );
+  })()}
+</TabsContent>
+
+  {/* New Panipatraks Tab */}
+<TabsContent value="panipatraks" className="space-y-4">
+  <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-4">
+    <h3 className="text-base sm:text-lg font-semibold">
+      Panipatraks - Farmer Allotments
+    </h3>
+    <Button
+      onClick={handleExportPanipatraks}
+      className="flex items-center gap-2 w-full sm:w-auto"
+      variant="outline"
+      size="sm"
+    >
+      <Download className="w-4 h-4" />
+      Export Panipatraks
+    </Button>
+  </div>
+
+  {yearSlabs.length === 0 ? (
+    <div className="text-center py-8">
+      <p className="text-gray-500 text-sm">No year slabs found</p>
+    </div>
+  ) : (
+    <div className="rounded-md border overflow-x-auto">
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead className="w-1/4">Year(s)</TableHead>
+            <TableHead className="w-1/2">Farmer Name</TableHead>
+            <TableHead className="w-1/4">Area Alloted</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {yearSlabs.map((slab) => {
+            const slabPanipatraks = panipatraks.filter(p => p.slabId === slab.id);
+            const periods = getYearPeriods(slab.startYear, slab.endYear);
+            const hasSameForAll = slabPanipatraks.length > 0 && 
+                                 slabPanipatraks.every(p => p.sameForAll === true);
+
+            if (hasSameForAll) {
+              // Single entry for all years
+              const firstPeriodData = slabPanipatraks.find(p => p.year === periods[0]?.from);
+              if (!firstPeriodData?.farmers?.length) return null;
+
+              return firstPeriodData.farmers.map((farmer: any, farmerIndex: number) => {
+                const areaInSqM = farmer.area.unit === "sq_m" 
+                  ? farmer.area.value 
+                  : convertToSquareMeters(farmer.area.value, "sq_m");
+                
+                const acres = convertToSquareMeters(areaInSqM, "acre");
+                const guntha = convertToSquareMeters(areaInSqM, "guntha") % 40;
+
+                return (
+                  <TableRow key={`${slab.id}-all-${farmerIndex}`}>
+                    <TableCell className="font-medium">
+                      {farmerIndex === 0 ? `${slab.startYear}-${slab.endYear}` : ''}
+                    </TableCell>
+                    <TableCell>{farmer.name}</TableCell>
+                    <TableCell>
+                      {Math.round(areaInSqM * 100) / 100} sq.m ({Math.floor(acres)} acre {Math.round(guntha)} guntha)
+                    </TableCell>
+                  </TableRow>
+                );
+              });
+            } else {
+              // Separate entries for each period
+              return periods.flatMap((period) => {
+                const periodData = slabPanipatraks.find(p => p.year === period.from);
+                if (!periodData?.farmers?.length) return null;
+
+                return periodData.farmers.map((farmer: any, farmerIndex: number) => {
+                  const areaInSqM = farmer.area.unit === "sq_m" 
+                    ? farmer.area.value 
+                    : convertToSquareMeters(farmer.area.value, "sq_m");
+                  
+                  const acres = convertToSquareMeters(areaInSqM, "acre");
+                  const guntha = convertToSquareMeters(areaInSqM, "guntha") % 40;
+
+                  return (
+                    <TableRow key={`${slab.id}-${period.period}-${farmerIndex}`}>
+                      <TableCell className="font-medium">
+                        {farmerIndex === 0 ? period.period : ''}
+                      </TableCell>
+                      <TableCell>{farmer.name}</TableCell>
+                      <TableCell>
+                        {Math.round(areaInSqM * 100) / 100} sq.m ({Math.floor(acres)} acre {Math.round(guntha)} guntha)
+                      </TableCell>
+                    </TableRow>
+                  );
+                });
+              });
+            }
+          })}
+        </TableBody>
+      </Table>
+    </div>
+  )}
 </TabsContent>
 
           <TabsContent value="query-list" className="space-y-4">
-            <div className="flex flex-col gap-4">
+            {/* <div className="flex flex-col gap-4"> */}
               <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-4">
                 <h3 className="text-base sm:text-lg font-semibold">
                   Nondhs Marked for Output ({filteredNondhs.length})
@@ -1510,9 +1826,18 @@ const handleSendComment = async (message: string, recipients: string[], isPushFo
                 
                 <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
                   <SNoFilterComponent />
+                  <Button
+                    onClick={handleExportQueryList}
+                    className="flex items-center gap-2 w-full sm:w-auto"
+                    variant="outline"
+                    size="sm"
+                  >
+                    <Download className="w-4 h-4" />
+                    Export Query List
+                  </Button>
                 </div>
               </div>
-            </div>
+
 
             {filteredNondhs.length === 0 ? (
               <div className="text-center py-8">
@@ -1579,7 +1904,6 @@ const handleSendComment = async (message: string, recipients: string[], isPushFo
           </TabsContent>
 
           <TabsContent value="passbook" className="space-y-4">
-            <div className="flex flex-col gap-4">
               <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-4">
                 <h3 className="text-base sm:text-lg font-semibold">
                   Land Ownership Records ({passbookData.length})
@@ -1587,9 +1911,18 @@ const handleSendComment = async (message: string, recipients: string[], isPushFo
                 
                 <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
                   <SNoFilterComponent />
+                   <Button
+                    onClick={handleExportPassbook}
+                    className="flex items-center gap-2 w-full sm:w-auto"
+                    variant="outline"
+                    size="sm"
+                  >
+                    <Download className="w-4 h-4" />
+                    Export Passbook
+                  </Button>
                 </div>
               </div>
-            </div>
+
 
             {passbookData.length === 0 ? (
               <div className="text-center py-8">
@@ -1652,6 +1985,15 @@ const handleSendComment = async (message: string, recipients: string[], isPushFo
                       onChange={(e) => setDateFilter(e.target.value)}
                       className="w-full sm:w-40"
                     />
+                    <Button
+                    onClick={handleExportDateWise}
+                    className="flex items-center gap-2 w-full sm:w-auto"
+                    variant="outline"
+                    size="sm"
+                  >
+                    <Download className="w-4 h-4" />
+                    Export Date-wise
+                  </Button>
                   </div>
                 </div>
               </div>
@@ -1717,38 +2059,70 @@ const handleSendComment = async (message: string, recipients: string[], isPushFo
               )}
             </div>
           </TabsContent>
-        </Tabs>
+          </Tabs>
 
-        <div className="flex flex-col sm:flex-row sm:justify-center items-stretch sm:items-center gap-4 mt-6 pt-4 border-t">
-            
-  {(role === 'manager' || role === 'admin' || role === 'executioner') && landRecordStatus !== 'review' && ( // ADD landRecordStatus check
-  <Button 
-    onClick={async () => {
-      if (!recordId || !user?.primaryEmailAddress?.emailAddress) return;
-      try {
-        await LandRecordService.updateLandRecord(recordId, { status: 'review' });
-        await createActivityLog({
-          user_email: user.primaryEmailAddress.emailAddress,
-          land_record_id: recordId,
-          step: 6,
-          chat_id: null,
-          description: `${role?.charAt(0).toUpperCase()}${role?.slice(1)} pushed the record for review. Status changed to Review.`
-        });
-        setLandRecordStatus('review'); // UPDATE LOCAL STATE
-        toast({ title: "Record pushed for review. Status changed to Review." });
-        router.push('/land-master');
-      } catch (error) {
-        console.error('Error pushing for review:', error);
-        toast({ title: "Error pushing for review", variant: "destructive" });
-      }
-    }}
-    className="w-full sm:w-auto flex items-center gap-2"
-    size="sm"
-  >
-    Push for Review
-  </Button>
-)}
-  {(role === 'manager' || role === 'admin' || role === 'executioner') && (
+         <div className="flex flex-col sm:flex-row sm:justify-center items-stretch sm:items-center gap-4 mt-6 pt-4 border-t">
+  {role === 'reviewer' ? (
+    landRecordStatus === 'review' && (
+      <Button 
+        onClick={async () => {
+          if (!recordId || !user?.primaryEmailAddress?.emailAddress) return;
+          try {
+            await LandRecordService.updateLandRecord(recordId, { status: 'query' });
+            await createActivityLog({
+              user_email: user.primaryEmailAddress.emailAddress,
+              land_record_id: recordId,
+              step: 6,
+              chat_id: null,
+              description: 'Reviewer marked the review as complete.'
+            });
+            setLandRecordStatus('query');
+            toast({ title: "Review marked as complete." });
+            refreshStatus();
+            router.push('/land-master');
+          } catch (error) {
+            console.error('Error marking review complete:', error);
+            toast({ title: "Error marking review complete", variant: "destructive" });
+          }
+        }}
+        className="w-full sm:w-auto flex items-center gap-2"
+        size="sm"
+      >
+        Mark Review Complete
+      </Button>
+    )
+  ) : (role === 'manager' || role === 'admin' || role === 'executioner') && (
+    landRecordStatus !== 'review' && (
+      <Button 
+        onClick={async () => {
+          if (!recordId || !user?.primaryEmailAddress?.emailAddress) return;
+          try {
+            await LandRecordService.updateLandRecord(recordId, { status: 'review' });
+            await createActivityLog({
+              user_email: user.primaryEmailAddress.emailAddress,
+              land_record_id: recordId,
+              step: 6,
+              chat_id: null,
+              description: `${role.charAt(0).toUpperCase() + role.slice(1)} pushed the record for review. Status changed to Review.`
+            });
+            setLandRecordStatus('review'); // UPDATE LOCAL STATE
+            toast({ title: "Record pushed for review. Status changed to Review." });
+            refreshStatus();
+            router.push('/land-master');
+          } catch (error) {
+            console.error('Error pushing for review:', error);
+            toast({ title: "Error pushing for review", variant: "destructive" });
+          }
+        }}
+        className="w-full sm:w-auto flex items-center gap-2"
+        size="sm"
+      >
+        Push for Review
+      </Button>
+    )
+  )}
+  {/* END NEW SECTION */}
+  {(role === 'manager' || role === 'admin' || role === 'reviewer' || role === 'executioner') && (
     <Button 
       onClick={() => setShowCommentModal(true)}
       className="w-full sm:w-auto flex items-center gap-2"
@@ -1756,35 +2130,38 @@ const handleSendComment = async (message: string, recipients: string[], isPushFo
       variant="outline"
     >
       <Send className="w-4 h-4" />
-      {role === 'executioner'
+      {role === 'reviewer' 
+        ? 'Send Message to Manager/Executioner'
+        : role === 'executioner'
         ? 'Send Message to Manager/Reviewer'
         : 'Send Message to Executioner/Reviewer'}
     </Button>
   )}
   
+  
   <Button 
-    onClick={() => {
-      toast({ title: "Returning to Land Master" });
-      router.push('/land-master');
-    }}
+    onClick={handleCompleteProcess}
     className="w-full sm:w-auto"
     size="sm"
   >
     Back to Land Master
   </Button>
 </div>
-      </CardContent>
-{showCommentModal && (
-  <CommentModal
-    isOpen={showCommentModal}
-    onClose={() => setShowCommentModal(false)}
-    onSubmit={handleSendComment}
-    loading={sendingComment}
-    step={6}
-    userRole={role || ''}
-    landRecordStatus={landRecordStatus}
-  />
-)}
-    </Card>
+        </CardContent>
+      </Card>
+
+      {/* Comment Modal */}
+      {showCommentModal && (
+        <CommentModal
+          isOpen={showCommentModal}
+          onClose={() => setShowCommentModal(false)}
+          onSubmit={handleSendComment}
+          loading={sendingComment}
+          step={6}
+          userRole={role || ''}
+          landRecordStatus={landRecordStatus} 
+        />
+      )}
+    </>
   )
 }

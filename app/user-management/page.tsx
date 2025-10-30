@@ -27,13 +27,24 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
-import { Loader2, RefreshCw } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Loader2, RefreshCw, Trash2 } from "lucide-react";
 
 interface UserInfo {
   id: string;
   email: string;
   fullName: string | null;
   role: string;
+  secondaryEmails: string[];
 }
 
 export default function UserManagementPage() {
@@ -41,6 +52,9 @@ export default function UserManagementPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [updatingUserId, setUpdatingUserId] = useState<string | null>(null);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [userToDelete, setUserToDelete] = useState<UserInfo | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
   const { user: currentUser } = useUser();
   const { isAdmin } = useUserRole();
   
@@ -84,7 +98,6 @@ export default function UserManagementPage() {
 
       if (!response.ok) throw new Error('Failed to update user role');
 
-      // Update local state
       setUsers(prevUsers => 
         prevUsers.map(userInfo => 
           userInfo.id === userId ? { ...userInfo, role: newRole } : userInfo
@@ -94,6 +107,39 @@ export default function UserManagementPage() {
       console.error('Error updating user role:', error);
     } finally {
       setUpdatingUserId(null);
+    }
+  };
+
+  const handleDeleteClick = (userInfo: UserInfo) => {
+    setUserToDelete(userInfo);
+    setDeleteDialogOpen(true);
+  };
+
+  const handleDeleteUser = async () => {
+    if (!userToDelete) return;
+
+    try {
+      setIsDeleting(true);
+      const response = await fetch('/api/users/delete', {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          userId: userToDelete.id
+        })
+      });
+
+      if (!response.ok) throw new Error('Failed to delete user');
+
+      // Remove user from local state
+      setUsers(prevUsers => prevUsers.filter(user => user.id !== userToDelete.id));
+      setDeleteDialogOpen(false);
+      setUserToDelete(null);
+    } catch (error) {
+      console.error('Error deleting user:', error);
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -143,6 +189,7 @@ export default function UserManagementPage() {
                 <TableRow>
                   <TableHead>Full Name</TableHead>
                   <TableHead>Email Address</TableHead>
+                  <TableHead>Secondary Emails</TableHead>
                   <TableHead>Role</TableHead>
                   <TableHead>Actions</TableHead>
                 </TableRow>
@@ -151,14 +198,35 @@ export default function UserManagementPage() {
                 {users.map((userInfo) => {
                   const isAdminEmail = process.env.NEXT_PUBLIC_ADMIN_EMAIL === userInfo.email;
                   const isUpdating = updatingUserId === userInfo.id;
+                  const isCurrentUser = currentUser?.id === userInfo.id;
+                  
                   return (
                     <TableRow key={userInfo.id}>
                       <TableCell>{userInfo.fullName || 'N/A'}</TableCell>
                       <TableCell>{userInfo.email}</TableCell>
+                      <TableCell>
+                        <div className="max-w-[200px]">
+                          {userInfo.secondaryEmails && userInfo.secondaryEmails.length > 0 ? (
+                            <div className="flex flex-col gap-1">
+                              {userInfo.secondaryEmails.map((email, index) => (
+                                <span 
+                                  key={index}
+                                  className="text-sm text-muted-foreground truncate"
+                                  title={email}
+                                >
+                                  {email}
+                                </span>
+                              ))}
+                            </div>
+                          ) : (
+                            <span className="text-sm text-muted-foreground">No secondary emails</span>
+                          )}
+                        </div>
+                      </TableCell>
                       <TableCell>{userInfo.role.charAt(0).toUpperCase() + userInfo.role.slice(1)}</TableCell>
                       <TableCell>
-                        {!isAdminEmail && (
-                          <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2">
+                          {!isAdminEmail && (
                             <Select
                               value={userInfo.role}
                               onValueChange={(value) => handleRoleChange(userInfo.id, value)}
@@ -173,11 +241,23 @@ export default function UserManagementPage() {
                                 <SelectItem value="reviewer">Reviewer</SelectItem>
                               </SelectContent>
                             </Select>
-                            {isUpdating && (
-                              <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-                            )}
-                          </div>
-                        )}
+                          )}
+                          {!isAdminEmail && !isCurrentUser && (
+                            <Button
+                              variant="destructive"
+                              size="sm"
+                              onClick={() => handleDeleteClick(userInfo)}
+                              disabled={isUpdating}
+                              className="flex items-center gap-2"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                              Delete
+                            </Button>
+                          )}
+                          {isUpdating && (
+                            <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                          )}
+                        </div>
                       </TableCell>
                     </TableRow>
                   );
@@ -187,6 +267,30 @@ export default function UserManagementPage() {
           )}
         </CardContent>
       </Card>
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Are you sure?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This action cannot be undone. This will permanently delete the user{" "}
+              <strong>{userToDelete?.fullName || userToDelete?.email}</strong> and remove their data from our servers.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDeleteUser}
+              disabled={isDeleting}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {isDeleting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Delete User
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
