@@ -394,7 +394,7 @@ const normalizeForComparison = (panipatraks: Panipatrak[]) => {
 
 export default function PanipatrakStep() {
   const { yearSlabs, setCurrentStep, currentStep, landBasicInfo, panipatraks, // get panipatraks from context
-  setPanipatraks, recordId } = useLandRecord();
+  setPanipatraks, recordId, refreshStatus } = useLandRecord();
   const { user } = useUser();
   const { getStepData, updateStepData } = useStepFormData(3);
   const [loading, setLoading] = useState(false);
@@ -1206,6 +1206,7 @@ const updateFarmer = (
     setOriginalData(normalizeForComparison(updatedPanipatraks));
     setHasChanges(false);
     
+    refreshStatus();
     toast({ title: "Panipatraks updated successfully" });
     setCurrentStep(4);
 

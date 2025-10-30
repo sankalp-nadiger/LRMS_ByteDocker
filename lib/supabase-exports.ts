@@ -1,6 +1,16 @@
 import { convertToSquareMeters } from './supabase';
 import * as XLSX from 'xlsx-js-style';
 
+interface ProjectExportData {
+  projectName: string;
+  district: string;
+  taluk: string;
+  village: string;
+  blockNo: string;
+  resurveyNo: string;
+  status: string;
+}
+
 // Base export function for Panipatraks
 // In lib/supabase-exports.ts - update the panipatraks export function
 export const exportPanipatraksToExcel = async (
@@ -302,7 +312,6 @@ export const exportQueryListToExcel = async (filteredNondhs: any[], landBasicInf
 };
 
 // Export function for Date-wise
-// Export function for Date-wise
 export const exportDateWiseToExcel = async (dateWiseData: any[], landBasicInfo: any) => {
   try {
     const wb = XLSX.utils.book_new();
@@ -329,11 +338,32 @@ export const exportDateWiseToExcel = async (dateWiseData: any[], landBasicInfo: 
           return status
       }
     };
+    // Nondh type translations
+const nondhTypeTranslations: Record<string, string> = {
+  "Kabjedaar": "કબજેદાર",
+  "Ekatrikaran": "એકત્રીકરણ",
+  "Varsai": "વારસાઈ",
+  "Hayati_ma_hakh_dakhal": "હયાતીમા હક દાખલ",
+  "Hakkami": "હક કમી",
+  "Vechand": "વેચાણ",
+  "Durasti": "દુરસ્તી",
+  "Promulgation": "પ્રમોલગેશન",
+  "Hukam": "હુકમથી",
+  "Vehchani": "વેંચાણી",
+  "Bojo": "બોજો દાખલ",
+  "Other": "વસિયત"
+};
+
+// Function to get display text with Gujarati translation
+const getNondhTypeDisplay = (type: string): string => {
+  const gujaratiText = nondhTypeTranslations[type];
+  return gujaratiText ? `${type} (${gujaratiText})` : type;
+};
 
     const wsData = [
       [headerInfo], // Header row
       [], // Empty row
-      ['Date', 'Nondh No.', 'Affected S.No', 'Type', 'Status', 'Show in Output']
+      ['Date', 'Nondh No.', 'Affected S.No', 'Nondh Type', 'Status', 'Show in Output']
     ];
 
     dateWiseData.forEach(nondh => {
@@ -344,7 +374,7 @@ export const exportDateWiseToExcel = async (dateWiseData: any[], landBasicInfo: 
         formattedDate,
         nondh.nondhNumber,
         nondh.affectedSNos || nondh.sNo,
-        nondh.type,
+        getNondhTypeDisplay(nondh.type),
         getStatusDisplayName(nondh.status), // Use the status mapping
         nondh.showInOutput ? 'Yes' : 'No'
       ]);
@@ -378,8 +408,8 @@ export const exportDateWiseToExcel = async (dateWiseData: any[], landBasicInfo: 
       { wch: 12 },  // Date
       { wch: 15 },  // Nondh No
       { wch: 20 },  // Affected S.No
-      { wch: 15 },  // Type
-      { wch: 20 },  // Status (increased width for bilingual text)
+      { wch: 25 },  // Nondh Type (increased width)
+      { wch: 20 },  // Status
       { wch: 15 }   // Show in Output
     ];
 
@@ -399,4 +429,110 @@ export const exportDateWiseToExcel = async (dateWiseData: any[], landBasicInfo: 
     console.error('Error exporting date-wise data:', error);
     throw error;
   }
+};
+
+export const exportProjectsToExcel = async (data: ProjectExportData[]) => {
+  // Create worksheet data with headers
+  const worksheetData = [
+    ['Project Name', 'District', 'Taluk', 'Village', 'Block No', 'Resurvey No', 'Status'],
+    ...data.map(row => [
+      row.projectName,
+      row.district,
+      row.taluk,
+      row.village,
+      row.blockNo,
+      row.resurveyNo,
+      row.status
+    ])
+  ];
+
+  // Create workbook and worksheet
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.aoa_to_sheet(worksheetData);
+
+  // Header styling
+  const headerStyle = {
+    font: { bold: true, color: { rgb: "FFFFFF" } },
+    fill: { fgColor: { rgb: "2563EB" } },
+    alignment: { horizontal: "center", vertical: "center" },
+    border: {
+      top: { style: "thin", color: { rgb: "000000" } },
+      bottom: { style: "thin", color: { rgb: "000000" } },
+      left: { style: "thin", color: { rgb: "000000" } },
+      right: { style: "thin", color: { rgb: "000000" } }
+    }
+  };
+
+  // Data cell styling
+  const dataStyle = {
+    alignment: { vertical: "center" },
+    border: {
+      top: { style: "thin", color: { rgb: "D1D5DB" } },
+      bottom: { style: "thin", color: { rgb: "D1D5DB" } },
+      left: { style: "thin", color: { rgb: "D1D5DB" } },
+      right: { style: "thin", color: { rgb: "D1D5DB" } }
+    }
+  };
+
+  // Project name cell styling (for cluster projects)
+  const projectNameStyle = {
+    font: { bold: true },
+    fill: { fgColor: { rgb: "DBEAFE" } },
+    alignment: { vertical: "center" },
+    border: {
+      top: { style: "thin", color: { rgb: "D1D5DB" } },
+      bottom: { style: "thin", color: { rgb: "D1D5DB" } },
+      left: { style: "thin", color: { rgb: "D1D5DB" } },
+      right: { style: "thin", color: { rgb: "D1D5DB" } }
+    }
+  };
+
+  // Apply header styles
+  const headerCells = ['A1', 'B1', 'C1', 'D1', 'E1', 'F1', 'G1'];
+  headerCells.forEach(cell => {
+    if (ws[cell]) {
+      ws[cell].s = headerStyle;
+    }
+  });
+
+  // Apply data styles
+  for (let row = 2; row <= data.length + 1; row++) {
+    const cells = ['A', 'B', 'C', 'D', 'E', 'F', 'G'];
+    cells.forEach((col, index) => {
+      const cellRef = `${col}${row}`;
+      if (ws[cellRef]) {
+        // Apply project name style if it has a value (cluster project)
+        if (index === 0 && ws[cellRef].v) {
+          ws[cellRef].s = projectNameStyle;
+        } else {
+          ws[cellRef].s = dataStyle;
+        }
+      }
+    });
+  }
+
+  // Set column widths
+  ws['!cols'] = [
+    { wch: 30 }, // Project Name
+    { wch: 15 }, // District
+    { wch: 15 }, // Taluk
+    { wch: 22 }, // Village
+    { wch: 12 }, // Block No
+    { wch: 15 }, // Resurvey No
+    { wch: 18 }  // Status
+  ];
+
+  // Set row height for header
+  ws['!rows'] = [{ hpt: 25 }];
+
+  // Add worksheet to workbook
+  XLSX.utils.book_append_sheet(wb, ws, 'Projects');
+
+  // Generate filename with timestamp
+  const now = new Date();
+const timestamp = `${String(now.getDate()).padStart(2, '0')}-${String(now.getMonth() + 1).padStart(2, '0')}-${now.getFullYear()}`;
+  const filename = `projects_export_${timestamp}.xlsx`;
+
+  // Write file
+  XLSX.writeFile(wb, filename);
 };

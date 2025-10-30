@@ -79,6 +79,7 @@ interface CommentModalProps {
   onSubmit: (message: string, recipients: string[]) => Promise<void>;
   loading?: boolean;
   step: number;
+  onCloseButtonClick?: () => void;
 }
 
 const AreaFields = ({ area, onChange, disabled = false }: AreaFieldsProps) => {
@@ -474,7 +475,7 @@ const AreaFields = ({ area, onChange, disabled = false }: AreaFieldsProps) => {
   );
 };
 
-const CommentModal = ({ isOpen, onClose, onSubmit, loading = false, step }: CommentModalProps) => {
+const CommentModal = ({ isOpen, onClose, onSubmit, loading = false, step, onCloseButtonClick }: CommentModalProps) => {
   const [message, setMessage] = useState('');
   const [showMentionDropdown, setShowMentionDropdown] = useState(false);
   const [mentionSearch, setMentionSearch] = useState('');
@@ -500,6 +501,14 @@ const CommentModal = ({ isOpen, onClose, onSubmit, loading = false, step }: Comm
       fetchUsers();
     }
   }, [isOpen]);
+
+  const handleCloseButtonClick = () => {
+    if (onCloseButtonClick) {
+      onCloseButtonClick(); // Call the special close handler
+    } else {
+      onClose(); // Fallback to regular close
+    }
+  };
 
   const handleMessageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value;
@@ -574,11 +583,11 @@ const CommentModal = ({ isOpen, onClose, onSubmit, loading = false, step }: Comm
       <Card className="w-full max-w-lg max-h-[80vh] overflow-hidden flex flex-col">
         <CardHeader className="flex-shrink-0 border-b bg-white sticky top-0 z-10">
           <div className="flex justify-between items-center">
-            <CardTitle>Send Message to Executioner - Step {step}</CardTitle>
+            <CardTitle>Assign to Executioner </CardTitle>
             <Button
               variant="ghost"
               size="sm"
-              onClick={onClose}
+              onClick={handleCloseButtonClick}
               disabled={loading}
             >
               <X className="w-4 h-4" />
@@ -616,7 +625,7 @@ const CommentModal = ({ isOpen, onClose, onSubmit, loading = false, step }: Comm
                 type="text"
                 value={message}
                 onChange={handleMessageChange}
-                placeholder="Type @ to mention someone or send to all executioners..."
+                placeholder="Type @ to assign to someone or send a thread to all..."
                 disabled={loading}
                 onKeyPress={(e) => e.key === 'Enter' && !showMentionDropdown && handleSubmit()}
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
@@ -644,14 +653,14 @@ const CommentModal = ({ isOpen, onClose, onSubmit, loading = false, step }: Comm
               )}
             </div>
             <p className="text-xs text-gray-500">
-              Type @ to mention specific users, or send to all executioners
+              Type @ to mention specific users
             </p>
           </div>
           
           <div className="flex gap-2 pt-4">
             <Button
               variant="outline"
-              onClick={onClose}
+              onClick={handleCloseButtonClick}
               disabled={loading}
               className="flex-1"
             >
@@ -667,7 +676,7 @@ const CommentModal = ({ isOpen, onClose, onSubmit, loading = false, step }: Comm
               ) : (
                 <Send className="w-4 h-4" />
               )}
-              Send Message
+              Send & Assign
             </Button>
           </div>
         </CardContent>
@@ -685,7 +694,8 @@ export default function LandBasicInfoComponent() {
     recordId, 
     setHasUnsavedChanges, 
     currentStep, 
-    hasUnsavedChanges 
+    hasUnsavedChanges,
+    setRecordId 
   } = useLandRecord()
   const { toast } = useToast()
   const router = useRouter()
@@ -698,7 +708,7 @@ const [loading, setLoading] = useState(false)
   const [showCommentModal, setShowCommentModal] = useState(false)
   const [savedRecordId, setSavedRecordId] = useState<string | null>(null)
   const [sendingComment, setSendingComment] = useState(false)
-  const role = useUserRole();
+  const { role } = useUserRole();
    const [showNavigationModal, setShowNavigationModal] = useState(false);
   
   // Form data with proper initialization
@@ -1016,6 +1026,8 @@ const validateForm = (): boolean => {
       
       if (error) throw error
 
+      setRecordId(result.id);
+
       // Update context with the saved data
       const updatedInfo: LandBasicInfo = {
         id: result.id,
@@ -1324,6 +1336,10 @@ const handleCloseDuplicateDialog = () => {
       <CommentModal
         isOpen={showCommentModal}
         onClose={() => setShowCommentModal(false)}
+        onCloseButtonClick={() => {
+    setShowCommentModal(false);
+    setShowNavigationModal(true);
+  }}
         onSubmit={handleSendComment}
         loading={sendingComment}
         step={currentStep}

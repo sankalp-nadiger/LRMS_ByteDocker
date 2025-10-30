@@ -72,6 +72,7 @@ function ViewFormsContainerInner() {
     landBasicInfo,
     formData,
     recordId,
+    statusRefreshTrigger
   } = useLandRecord();
   const searchParams = useSearchParams();
   const { user } = useUser();
@@ -482,7 +483,7 @@ function ViewFormsContainerInner() {
   const [landRecordStatus, setLandRecordStatus] = useState('initiated');
 const [isLoadingStatus, setIsLoadingStatus] = useState(true);
 
-// Add this useEffect to fetch the land record status
+// useEffect to fetch the land record status
 useEffect(() => {
   const fetchLandRecordStatus = async () => {
     if (!recordId) {
@@ -505,7 +506,7 @@ useEffect(() => {
   };
 
   fetchLandRecordStatus();
-}, [recordId]);
+}, [recordId, statusRefreshTrigger]);
 
   return (
     <AuthProvider>
@@ -800,7 +801,7 @@ useEffect(() => {
                       value={commentMessage}
                       onChange={handleCommentChange}
                       onKeyPress={(e) => e.key === 'Enter' && !showMentionDropdown && handleSendComment()}
-                      placeholder="Type @ to mention someone or just send to all..."
+                      placeholder="Type @ to mention someone"
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                       disabled={isSending}
                     />
@@ -828,7 +829,7 @@ useEffect(() => {
                   </div>
 
                   <p className="text-xs text-gray-500">
-                    Type @ to mention specific users, or send to everyone
+                    Type @ to mention specific users
                   </p>
 
                   {/* Send Button */}
@@ -1022,7 +1023,7 @@ useEffect(() => {
                     </div>
                     
                     <p className="text-xs text-gray-500 mt-2">
-                      Type @ to mention specific users, or send to everyone. Messages are tied to this land record.
+                      Type @ to mention specific users. Messages are tied to this land record.
                     </p>
                   </div>
                 </CardContent>

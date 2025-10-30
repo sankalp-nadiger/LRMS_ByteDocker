@@ -40,6 +40,28 @@ const hukamTypes = ["SSRD", "Collector", "Collector_ganot", "Prant", "Mamlajdaar
 
 const ganotOptions = ["1st Right", "2nd Right"]
 
+// Nondh type translations
+const nondhTypeTranslations: Record<string, string> = {
+  "Kabjedaar": "કબજેદાર",
+  "Ekatrikaran": "એકત્રીકરણ",
+  "Varsai": "વારસાઈ",
+  "Hayati_ma_hakh_dakhal": "હયાતીમા હક દાખલ",
+  "Hakkami": "હક કમી",
+  "Vechand": "વેચાણ",
+  "Durasti": "દુરસ્તી",
+  "Promulgation": "પ્રમોલગેશન",
+  "Hukam": "હુકમથી",
+  "Vehchani": "વેંચાણી",
+  "Bojo": "બોજો દાખલ",
+  "Other": "વસિયત"
+};
+
+// Function to get display text with Gujarati translation
+const getNondhTypeDisplay = (type: string): string => {
+  const gujaratiText = nondhTypeTranslations[type];
+  return gujaratiText ? `${type} (${gujaratiText})` : type;
+};
+
 interface AreaFieldsProps {
   area: { 
     value: number; 
@@ -86,32 +108,6 @@ const areaFields = ({ area, onChange, disabled = false, maxValue }: AreaFieldsPr
     }
     
     return newValue;
-  };
-
-  const handleValueChange = (field: string, value: string) => {
-    const numValue = parseFloat(value) || 0;
-    
-    // Apply validation
-    const validatedValue = validateAreaInput(numValue, area);
-    
-    if (area.unit === 'acre_guntha') {
-      const newArea = { ...area, [field]: validatedValue };
-      
-      // Recalculate the other field if acres/gunthas changed
-      if (field === 'acres') {
-        // Keep gunthas as is, just update acres
-      } else if (field === 'gunthas') {
-        // Keep acres as is, just update gunthas
-        if (validatedValue >= 40) {
-          newArea.acres = (area.acres || 0) + Math.floor(validatedValue / 40);
-          newArea.gunthas = validatedValue % 40;
-        }
-      }
-      
-      onChange(newArea);
-    } else {
-      onChange({ ...area, value: validatedValue });
-    }
   };
 
   // Helper functions for conversions
@@ -566,7 +562,7 @@ const areaFields = ({ area, onChange, disabled = false, maxValue }: AreaFieldsPr
 };
 
 export default function NondhDetailsEdit() {
-  const { landBasicInfo, yearSlabs, nondhs: contextNondhs, setNondhs, recordId, setCurrentStep } = useLandRecord()
+  const { landBasicInfo, yearSlabs, nondhs: contextNondhs, setNondhs, recordId, setCurrentStep, refreshStatus } = useLandRecord()
   const { toast } = useToast()
   const { user } = useUser()
 const { getStepData, updateStepData, markAsSaved, hasUnsavedChanges } = useStepFormData(5)
@@ -2797,7 +2793,7 @@ const recalculateOwnerValidity = () => {
     });
 
     setHasChanges(false);
-    
+    refreshStatus();
     toast({ title: "Changes saved successfully" });
     setCurrentStep(6);
     
@@ -3671,7 +3667,7 @@ const formatArea = (area: { value: number; unit: string }) => {
                                         {typeLabel} No: {nondh.affectedSNos[0] || ''}
                                       </span>
                                       <span className="text-xs px-1.5 py-0.5 bg-gray-100 dark:bg-gray-800 rounded">
-                                        Type: {type}
+                                        Type: {getNondhTypeDisplay(type)}  
                                       </span>
                                     </div>
                                   </div>
@@ -4406,7 +4402,7 @@ const formatArea = (area: { value: number; unit: string }) => {
                             <SelectContent>
                               {nondhTypes.map((type) => (
                                 <SelectItem key={type} value={type}>
-                                  {type}
+                                  {getNondhTypeDisplay(type)}
                                 </SelectItem>
                               ))}
                             </SelectContent>
