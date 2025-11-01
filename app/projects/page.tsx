@@ -11,7 +11,8 @@ import {
   updateProject 
 } from '@/lib/supabase';
 import LandRecordTimeline from '@/components/LandRecordTimeline';
-import { Plus, FolderOpen, MapPin, Calendar, User, Search, Edit, ArrowLeft, Trash2 } from 'lucide-react';
+import { Plus, FolderOpen, MapPin, Calendar, User, Search, Edit, ArrowLeft, Trash2, Download } from 'lucide-react';
+import { exportProjectsToExcel } from '@/lib/supabase-exports';
 
 interface Project {
   id: string;
@@ -80,8 +81,8 @@ const fetchData = async () => {
       .filter(record => !landIdsInClusters.has(record.id))
       .map(record => ({
         id: `individual_${record.id}`,
-        name: `${record.village}, ${record.taluka}`,
-        description: `Block No: ${record.block_no} | District: ${record.district}`,
+        name: `${record.village}, Block No: ${record.block_no}`,
+        description: `Taluk: ${record.taluka} | District: ${record.district}`,
         created_by_email: record.user_email || 'system',
         created_at: record.created_at,
         land_record_ids: [record.id],
@@ -179,6 +180,57 @@ const selectedProject = useMemo(() => {
   }
 };
 
+const handleExportToExcel = async () => {
+  try {
+    // Prepare data for export
+    const exportData = [];
+    
+    // Process cluster projects
+    const clusterProjects = projects.filter(p => !p.is_individual);
+    for (const project of clusterProjects) {
+      const projectLandRecords = landRecords.filter(record =>
+        project.land_record_ids?.includes(record.id)
+      );
+      
+      for (const record of projectLandRecords) {
+        exportData.push({
+          projectName: project.name,
+          district: record.district,
+          taluk: record.taluka,
+          village: record.village,
+          blockNo: record.block_no,
+          resurveyNo: record.resurvey_no || 'N/A',
+          status: record.status === 'review2' ? 'External Review' : 
+                  record.status.charAt(0).toUpperCase() + record.status.slice(1)
+        });
+      }
+    }
+    
+    // Process individual land records (not in any cluster)
+    const individualProjects = projects.filter(p => p.is_individual);
+    for (const project of individualProjects) {
+      const record = landRecords.find(r => r.id === project.land_record_ids?.[0]);
+      if (record) {
+        exportData.push({
+          projectName: '',
+          district: record.district,
+          taluk: record.taluka,
+          village: record.village,
+          blockNo: record.block_no,
+          resurveyNo: record.resurvey_no || 'N/A',
+          status: record.status === 'review2' ? 'External Review' : 
+                  record.status.charAt(0).toUpperCase() + record.status.slice(1)
+        });
+      }
+    }
+    
+    await exportProjectsToExcel(exportData);
+  } catch (error) {
+    console.error('Error exporting to Excel:', error);
+    alert('Failed to export data. Please try again.');
+  }
+};
+
  const handleRemoveLandRecord = async (landRecordId: string) => {
   if (!selectedProject || selectedProject.is_individual) return;
 
@@ -244,10 +296,10 @@ const selectedProject = useMemo(() => {
             </button>
             <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200">
               <h1 className="text-2xl font-bold text-gray-900">
-                {selectedLandRecord.village}, {selectedLandRecord.taluka}
+                {selectedLandRecord.village}, {selectedLandRecord.block_no}
               </h1>
               <p className="text-gray-600">
-                Project: {selectedProject?.name} • Block No: {selectedLandRecord.block_no} • District: {selectedLandRecord.district}
+                Project: {selectedProject?.name} • Taluk: {selectedLandRecord.taluka} • District: {selectedLandRecord.district}
               </p>
             </div>
           </div>
@@ -267,36 +319,46 @@ const selectedProject = useMemo(() => {
       <div className="max-w-7xl mx-auto">
         {/* Header */}
         <div className="mb-8">
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
-            <div>
-              <h1 className="text-3xl font-bold text-gray-900">Projects</h1>
-              <p className="text-gray-600 mt-2">
-                Manage collections of land records and track their progress
-              </p>
-            </div>
-            <button
-              onClick={() => setShowCreateForm(true)}
-              className="flex items-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors shadow-sm"
-            >
-              <Plus className="h-5 w-5" />
-              New Project
-            </button>
-          </div>
+  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
+    <div>
+      <h1 className="text-3xl font-bold text-gray-900">Projects</h1>
+      <p className="text-gray-600 mt-2">
+        Manage collections of land records and track their progress
+      </p>
+    </div>
+    <div className="flex gap-3">
+      <button
+        onClick={handleExportToExcel}
+        disabled={projects.length === 0}
+        className="flex items-center gap-2 px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors shadow-sm"
+      >
+        <Download className="h-5 w-5" />
+        Export to Excel
+      </button>
+      <button
+        onClick={() => setShowCreateForm(true)}
+        className="flex items-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors shadow-sm"
+      >
+        <Plus className="h-5 w-5" />
+        New Project
+      </button>
+    </div>
+  </div>
 
-          {/* Search Bar */}
-          <div className="max-w-md">
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-              <input
-                type="text"
-                placeholder="Search projects..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              />
-            </div>
-          </div>
-        </div>
+  {/* Search Bar */}
+  <div className="max-w-md">
+    <div className="relative">
+      <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+      <input
+        type="text"
+        placeholder="Search projects..."
+        value={searchTerm}
+        onChange={(e) => setSearchTerm(e.target.value)}
+        className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+      />
+    </div>
+  </div>
+</div>
 
         {/* Create Project Modal */}
         {showCreateForm && (
@@ -525,14 +587,17 @@ const selectedProject = useMemo(() => {
             <div className="flex justify-between items-start">
               <div className="flex-1">
                 <p className="font-medium text-sm text-gray-900">
-                  {record.village}, {record.taluka}
+                  {record.village}, {record.block_no}
                 </p>
                 <p className="text-xs text-gray-500">
-                  Block No: {record.block_no} | District: {record.district}
+                  Taluk: {record.taluka} | District: {record.district}
                 </p>
                 <p className="text-xs text-gray-500 capitalize">
-                  Status: {record.status}
-                </p>
+  Status:{' '}
+  {record.status === 'review2'
+    ? 'External Review'
+    : record.status.charAt(0).toUpperCase() + record.status.slice(1)}
+</p>
               </div>
               <button
                 onClick={() => handleAddLandRecord(record.id)}
@@ -622,19 +687,23 @@ const selectedProject = useMemo(() => {
                           <div className="flex justify-between items-start">
                             <div className="flex-1">
                               <h4 className="font-semibold text-gray-900 mb-2">
-                                {record.village}, {record.taluka}
+                                {record.village}, {record.block_no}
                               </h4>
                               <div className="grid grid-cols-1 md:grid-cols-3 gap-2 text-sm text-gray-600 mb-3">
                                 <div>
+                                  <span className="font-medium">Taluk:</span> {record.taluka}
+                                </div>
+                                <div>
                                   <span className="font-medium">District:</span> {record.district}
-                                </div>
+                                </div>                             
                                 <div>
-                                  <span className="font-medium">Block No:</span> {record.block_no}
-                                </div>
-                                <div>
-                                  <span className="font-medium">Status:</span> 
-                                  <span className="ml-1 capitalize">{record.status}</span>
-                                </div>
+  <span className="font-medium">Status:</span> 
+  <span className="ml-1 capitalize">
+    {record.status === 'review2'
+      ? 'External Review'
+      : record.status.charAt(0).toUpperCase() + record.status.slice(1)}
+  </span>
+</div>
                               </div>
                               <div className="flex gap-2">
                                 <button

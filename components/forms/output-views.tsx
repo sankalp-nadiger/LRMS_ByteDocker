@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
@@ -8,12 +8,21 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
-import { ArrowLeft, Download, Eye, Filter, Calendar, AlertTriangle } from "lucide-react"
+import { ArrowLeft, Download, Eye, Filter, Calendar, AlertTriangle, Send, X, Loader2 } from "lucide-react"
 import { useLandRecord } from "@/contexts/land-record-context"
-import { convertToSquareMeters } from "@/lib/supabase"
+import { convertToSquareMeters, LandRecordService } from "@/lib/supabase"
 import { useToast } from "@/hooks/use-toast"
 import { supabase } from "@/lib/supabase"
 import { useRouter } from "next/navigation"
+import { useUser } from "@clerk/nextjs"
+import { createActivityLog, createChat } from "@/lib/supabase"
+import { useUserRole } from '@/contexts/user-context'
+import { 
+  exportPanipatraksToExcel, 
+  exportPassbookToExcel, 
+  exportQueryListToExcel, 
+  exportDateWiseToExcel 
+} from "@/lib/supabase-exports"
 
 interface PassbookEntry {
   year: number
@@ -22,6 +31,14 @@ interface PassbookEntry {
   sNo: string
   nondhNumber: string
   createdAt: string
+}
+
+// Add this interface at the top of the file, after the imports
+interface User {
+  id: string;
+  email: string;
+  fullName: string;
+  role: string;
 }
 
 interface NondhDetail {
@@ -49,9 +66,297 @@ interface NondhDetail {
   docUrl?: string
 }
 
+// Comment Modal Component
+interface CommentModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+ onSubmit: (message: string, recipients: string[], isReviewComplete?: boolean) => Promise<void>;
+  loading?: boolean;
+  step: number;
+  userRole: string;
+  landRecordStatus?: string;
+}
+
+const CommentModal = ({ isOpen, onClose, onSubmit, loading = false, step, userRole, landRecordStatus }: CommentModalProps) => {
+  const [message, setMessage] = useState('');
+  const [showMentionDropdown, setShowMentionDropdown] = useState(false);
+  const [mentionSearch, setMentionSearch] = useState('');
+  const [selectedRecipients, setSelectedRecipients] = useState<string[]>([]);
+  const [cursorPosition, setCursorPosition] = useState(0);
+  const [users, setUsers] = useState<User[]>([]);
+  const [isReviewComplete, setIsReviewComplete] = useState(false);
+  const { user } = useUser();
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // Determine the modal title based on user role
+  const modalTitle = !userRole 
+  ? `Send Message - Step ${step}`
+  : userRole === 'manager' || userRole === 'admin'
+  ? `Send Message to Executioner/Reviewer - Step ${step}`
+  : userRole === 'executioner'
+  ? `Send Message to Manager/Reviewer - Step ${step}`
+  : `Send Message - Step ${step}`;
+  
+  // Fetch users when modal opens
+  useEffect(() => {
+    if (isOpen) {
+      const fetchUsers = async () => {
+        try {
+          const response = await fetch('/api/users/list');
+          if (!response.ok) throw new Error('Failed to fetch users');
+          const data = await response.json();
+          setUsers(data.users);
+        } catch (error) {
+          console.error('Error fetching users:', error);
+        }
+      };
+      fetchUsers();
+      // Reset state when modal opens
+      setMessage('');
+      setSelectedRecipients([]);
+      setShowMentionDropdown(false);
+      // Set isReviewComplete based on status
+    if (userRole === 'reviewer') {
+      setIsReviewComplete(landRecordStatus === 'review');
+    } else {
+      setIsReviewComplete(false);
+    }
+    }
+}, [isOpen, landRecordStatus, userRole]); 
+
+  const handleMessageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    const position = e.target.selectionStart || 0;
+    
+    setMessage(value);
+    setCursorPosition(position);
+
+    // Check for @ mention
+    const textBeforeCursor = value.substring(0, position);
+    const lastAtIndex = textBeforeCursor.lastIndexOf('@');
+    
+    if (lastAtIndex !== -1) {
+      const afterAt = textBeforeCursor.substring(lastAtIndex + 1);
+      const beforeAt = textBeforeCursor.substring(0, lastAtIndex);
+      if (beforeAt === '' || beforeAt.endsWith(' ')) {
+        setMentionSearch(afterAt);
+        setShowMentionDropdown(true);
+        return;
+      }
+    }
+    
+    setShowMentionDropdown(false);
+  };
+
+  const handleMentionSelect = (userEmail: string, userName: string) => {
+    const textBeforeCursor = message.substring(0, cursorPosition);
+    const textAfterCursor = message.substring(cursorPosition);
+    const lastAtIndex = textBeforeCursor.lastIndexOf('@');
+    
+    const beforeMention = message.substring(0, lastAtIndex);
+    const newText = beforeMention + `@${userName} ` + textAfterCursor;
+    
+    setMessage(newText);
+    setSelectedRecipients([...selectedRecipients, userEmail]);
+    setShowMentionDropdown(false);
+    setMentionSearch('');
+    
+    setTimeout(() => {
+      inputRef.current?.focus();
+    }, 0);
+  };
+
+  const removeMention = (email: string) => {
+    setSelectedRecipients(selectedRecipients.filter(e => e !== email));
+  };
+
+  const getUserByEmail = (email: string) => {
+    return users.find(u => u.email === email);
+  };
+
+  const filteredUsers = users
+    .filter(u => u.email !== user?.primaryEmailAddress?.emailAddress)
+    .filter(u => !selectedRecipients.includes(u.email))
+    .filter(u => 
+      mentionSearch === '' || 
+      u.fullName.toLowerCase().includes(mentionSearch.toLowerCase()) ||
+      u.email.toLowerCase().includes(mentionSearch.toLowerCase())
+    );
+
+  const handleSubmit = async () => {
+    if (!message.trim()) return;
+    await onSubmit(message, selectedRecipients, isReviewComplete);
+    setMessage('');
+    setSelectedRecipients([]);
+    setIsReviewComplete(false);
+  };
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+      <Card className="w-full max-w-lg max-h-[80vh] overflow-hidden flex flex-col">
+        <CardHeader className="flex-shrink-0 border-b bg-white sticky top-0 z-10">
+          <div className="flex justify-between items-center">
+            <CardTitle>{modalTitle}</CardTitle>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={onClose}
+              disabled={loading}
+            >
+              <X className="w-4 h-4" />
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-4 overflow-y-auto flex-1 p-6 pt-4">
+          {/* Selected Recipients Pills */}
+          {selectedRecipients.length > 0 && (
+            <div className="flex flex-wrap gap-2 mb-2">
+              {selectedRecipients.map(email => {
+                const recipient = getUserByEmail(email);
+                return (
+                  <span key={email} className="inline-flex items-center gap-1 px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-sm">
+                    {recipient?.fullName || email}
+                    <button
+                      onClick={() => removeMention(email)}
+                      className="hover:text-blue-900 text-xs"
+                    >
+                      ×
+                    </button>
+                  </span>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Message Input */}
+          <div className="space-y-2">
+            <Label htmlFor="comment-message">Message</Label>
+            <div className="relative">
+              <input
+                ref={inputRef}
+                id="comment-message"
+                type="text"
+                value={message}
+                onChange={handleMessageChange}
+                placeholder={userRole === 'reviewer' 
+                  ? "Type @ to mention someone or send to all managers/executioners..." 
+                  : "Type @ to mention someone or send to all executioners..."}
+                disabled={loading}
+                onKeyPress={(e) => e.key === 'Enter' && !showMentionDropdown && handleSubmit()}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              />
+
+              {/* Mention Dropdown */}
+              {showMentionDropdown && filteredUsers.length > 0 && (
+                <div className="absolute top-full left-0 mt-1 w-full bg-white border border-gray-300 rounded-lg shadow-lg max-h-48 overflow-y-auto z-20">
+                  {filteredUsers.map(u => (
+                    <button
+                      key={u.id}
+                      onClick={() => handleMentionSelect(u.email, u.fullName)}
+                      className="w-full text-left px-4 py-2 hover:bg-gray-100 flex items-center justify-between border-b border-gray-100 last:border-b-0"
+                    >
+                      <div className="flex flex-col items-start">
+                        <span className="font-medium text-sm">{u.fullName}</span>
+                        <span className="text-xs text-gray-500">{u.email}</span>
+                      </div>
+                      <span className="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded">
+                        {u.role.charAt(0).toUpperCase() + u.role.slice(1)}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            <p className="text-xs text-gray-500">
+              Type @ to mention specific users, or send to all {userRole === 'reviewer' ? 'managers/executioners' : 'executioners'}
+            </p>
+          </div>
+         {userRole === 'reviewer' ? (
+  landRecordStatus === 'review' && ( // ADD THIS CONDITION
+    <div className="flex items-center gap-2 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+      <input
+        type="checkbox"
+        id="review-complete"
+        checked={isReviewComplete}
+        onChange={(e) => setIsReviewComplete(e.target.checked)}
+        className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
+      />
+      <Label htmlFor="review-complete" className="text-sm font-medium cursor-pointer">
+        Mark Review as Complete
+      </Label>
+    </div>
+  )
+) : (userRole === 'manager' || userRole === 'admin' || userRole === 'executioner') && (
+  landRecordStatus !== 'review' && ( // ADD THIS CONDITION
+    <div className="flex items-center gap-2 p-3 bg-green-50 border border-green-200 rounded-lg">
+      <input
+        type="checkbox"
+        id="push-review"
+        checked={isReviewComplete}
+        onChange={(e) => setIsReviewComplete(e.target.checked)}
+        className="w-4 h-4 text-green-600 rounded focus:ring-green-500"
+      />
+      <Label htmlFor="push-review" className="text-sm font-medium cursor-pointer">
+        Push for Review
+      </Label>
+    </div>
+  )
+)}
+          <div className="flex gap-2 pt-4">
+            <Button
+              variant="outline"
+              onClick={onClose}
+              disabled={loading}
+              className="flex-1"
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleSubmit}
+              disabled={loading || !message.trim()}
+              className="flex-1 flex items-center gap-2"
+            >
+              {loading ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <Send className="w-4 h-4" />
+              )}
+              Send Message
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+};
+
+// Nondh type translations
+const nondhTypeTranslations: Record<string, string> = {
+  "Kabjedaar": "કબજેદાર",
+  "Ekatrikaran": "એકત્રીકરણ",
+  "Varsai": "વારસાઈ",
+  "Hayati_ma_hakh_dakhal": "હયાતીમા હક દાખલ",
+  "Hakkami": "હક કમી",
+  "Vechand": "વેચાણ",
+  "Durasti": "દુરસ્તી",
+  "Promulgation": "પ્રમોલગેશન",
+  "Hukam": "હુકમથી",
+  "Vehchani": "વેંચાણી",
+  "Bojo": "બોજો દાખલ",
+  "Other": "વસિયત"
+};
+
+// Function to get display text with Gujarati translation
+const getNondhTypeDisplay = (type: string): string => {
+  const gujaratiText = nondhTypeTranslations[type];
+  return gujaratiText ? `${type} (${gujaratiText})` : type;
+};
+
 export default function OutputViews() {
 
-  const { landBasicInfo, yearSlabs, panipatraks, nondhs, nondhDetails, recordId} = useLandRecord()
+  const { landBasicInfo, yearSlabs, panipatraks: contextPanipatraks, nondhs, nondhDetails, recordId} = useLandRecord()
   const { toast } = useToast()
   const router = useRouter()
   const [passbookData, setPassbookData] = useState<PassbookEntry[]>([])
@@ -59,6 +364,269 @@ export default function OutputViews() {
   const [dateFilter, setDateFilter] = useState("")
   const [sNoFilter, setSNoFilter] = useState("")
   const [isGeneratingPDF, setIsGeneratingPDF] = useState(false)
+  const { user } = useUser()
+const { role } = useUserRole()
+const [showCommentModal, setShowCommentModal] = useState(false)
+const [sendingComment, setSendingComment] = useState(false)
+const [landRecordStatus, setLandRecordStatus] = useState<string>('');
+const [panipatraksState, setPanipatraksState] = useState<any[]>(contextPanipatraks || [])
+const [expandedSlabs, setExpandedSlabs] = useState<Record<string, boolean>>({})
+const [expandedPeriods, setExpandedPeriods] = useState<Record<string, boolean>>({})
+
+// Fetch panipatraks data
+useEffect(() => {
+    const fetchPanipatraks = async () => {
+      // If we already have panipatraks in context, use them
+      if (contextPanipatraks && contextPanipatraks.length > 0) {
+        setPanipatraksState(contextPanipatraks);
+        return;
+      }
+      
+      // Otherwise fetch from DB
+      if (!recordId) return;
+      
+      try {
+        const { data, error } = await LandRecordService.getPanipatraks(recordId);
+        if (error) throw error;
+        
+        setPanipatraksState(data || []);
+        
+        // Initialize expanded states for slabs
+        const initialExpanded: Record<string, boolean> = {};
+        yearSlabs.forEach(slab => {
+          initialExpanded[slab.id] = true;
+        });
+        setExpandedSlabs(initialExpanded);
+        
+      } catch (error) {
+        console.error('Error fetching panipatraks:', error);
+      }
+    };
+    
+    if (recordId && yearSlabs.length > 0) {
+      fetchPanipatraks();
+    }
+  }, [recordId, yearSlabs, contextPanipatraks]); 
+
+  // Add this function before the return statement, after other functions
+const refreshStatus = () => {
+  // This would typically refetch the land record status
+  const fetchStatus = async () => {
+    if (!recordId) return;
+    try {
+      const { data, error } = await LandRecordService.getLandRecord(recordId);
+      if (error) throw error;
+      if (data) {
+        setLandRecordStatus(data.status || '');
+      }
+    } catch (error) {
+      console.error('Error refreshing status:', error);
+    }
+  };
+  fetchStatus();
+};
+
+// Export functions for each tab
+const handleExportPanipatraks = async () => {
+  if (!landBasicInfo) {
+    toast({
+      title: 'Error',
+      description: 'Land basic information is required',
+      variant: 'destructive'
+    });
+    return;
+  }
+
+  try {
+    await exportPanipatraksToExcel(panipatraksState, landBasicInfo, yearSlabs);
+    toast({
+      title: 'Success',
+      description: 'Panipatraks exported successfully',
+    });
+  } catch (error) {
+    console.error('Error exporting panipatraks:', error);
+    toast({
+      title: 'Error',
+      description: 'Failed to export panipatraks',
+      variant: 'destructive'
+    });
+  }
+};
+
+const handleExportPassbook = async () => {
+  if (!landBasicInfo) {
+    toast({
+      title: 'Error',
+      description: 'Land basic information is required',
+      variant: 'destructive'
+    });
+    return;
+  }
+
+  try {
+    await exportPassbookToExcel(passbookData, landBasicInfo);
+    toast({
+      title: 'Success',
+      description: 'Passbook exported successfully',
+    });
+  } catch (error) {
+    console.error('Error exporting passbook:', error);
+    toast({
+      title: 'Error',
+      description: 'Failed to export passbook',
+      variant: 'destructive'
+    });
+  }
+};
+
+const handleExportQueryList = async () => {
+  if (!landBasicInfo) {
+    toast({
+      title: 'Error',
+      description: 'Land basic information is required',
+      variant: 'destructive'
+    });
+    return;
+  }
+
+  try {
+    await exportQueryListToExcel(filteredNondhs, landBasicInfo);
+    toast({
+      title: 'Success',
+      description: 'Query list exported successfully',
+    });
+  } catch (error) {
+    console.error('Error exporting query list:', error);
+    toast({
+      title: 'Error',
+      description: 'Failed to export query list',
+      variant: 'destructive'
+    });
+  }
+};
+
+const handleExportDateWise = async () => {
+  if (!landBasicInfo) {
+    toast({
+      title: 'Error',
+      description: 'Land basic information is required',
+      variant: 'destructive'
+    });
+    return;
+  }
+
+  try {
+    const dateWiseData = await getFilteredByDate();
+    await exportDateWiseToExcel(dateWiseData, landBasicInfo);
+    toast({
+      title: 'Success',
+      description: 'Date-wise data exported successfully',
+    });
+  } catch (error) {
+    console.error('Error exporting date-wise data:', error);
+    toast({
+      title: 'Error',
+      description: 'Failed to export date-wise data',
+      variant: 'destructive'
+    });
+  }
+};
+
+  // Handle comment submission
+// Update the handleSendComment function to handle potential API issues
+const handleSendComment = async (message: string, recipients: string[], isReviewComplete: boolean = false) => {
+  if (!recordId || !user?.primaryEmailAddress?.emailAddress) {
+    toast({ title: "Missing user information", variant: "destructive" });
+    return;
+  }
+
+  try {
+    setSendingComment(true);
+
+    const toEmails = recipients.length > 0 ? recipients : null;
+
+    // Try the createChat function with different parameter formats
+    let chatData;
+    try {
+      // Try with the current format
+      chatData = await createChat({
+        from_email: user.primaryEmailAddress.emailAddress,
+        to_email: toEmails,
+        message: message,
+        land_record_id: recordId,
+        step: 6
+      });
+    } catch (chatError) {
+      console.error('Chat creation failed with current format:', chatError);
+      // Try alternative format
+      chatData = await createChat({
+        user_email: user.primaryEmailAddress.emailAddress,
+        recipients: toEmails,
+        message: message,
+        land_record_id: recordId,
+        step: 6
+      });
+    }
+
+    const recipientText = toEmails 
+      ? `to ${toEmails.length} recipient(s)` 
+      : 'to all relevant users';
+
+    await createActivityLog({
+      user_email: user.primaryEmailAddress.emailAddress,
+      land_record_id: recordId,
+      step: 6,
+      chat_id: chatData.id,
+      description: `Sent message ${recipientText}: ${message}`
+    });
+
+    // Handle review completion or push for review
+    if (isReviewComplete) {
+      if (role === 'reviewer') {
+        // Reviewer marking review as complete
+        await LandRecordService.updateLandRecord(recordId, { status: 'completed' });
+        
+        await createActivityLog({
+          user_email: user.primaryEmailAddress.emailAddress,
+          land_record_id: recordId,
+          step: 6,
+          chat_id: null,
+          description: 'Reviewer marked the review as complete.'
+        });
+
+        setLandRecordStatus('completed');
+        toast({ title: "Review marked as complete." });
+      } else {
+        // Manager/Admin/Executioner pushing for review
+        await LandRecordService.updateLandRecord(recordId, { status: 'review' });
+        
+        await createActivityLog({
+          user_email: user.primaryEmailAddress.emailAddress,
+          land_record_id: recordId,
+          step: 6,
+          chat_id: null,
+          description: `${role.charAt(0).toUpperCase() + role.slice(1)} pushed the record for review.`
+        });
+
+        setLandRecordStatus('review');
+        toast({ title: "Record pushed for review." });
+      }
+    } else {
+      toast({ title: "Message sent successfully" });
+    }
+
+    setShowCommentModal(false);
+  } catch (error) {
+    console.error('Error sending comment:', error);
+    toast({ 
+      title: "Error sending message", 
+      description: error instanceof Error ? error.message : "Please try again",
+      variant: "destructive" 
+    });
+  } finally {
+    setSendingComment(false);
+  }
+};
 
   const handleDownloadIntegratedDocument = async () => {
   if (!landBasicInfo) {
@@ -432,10 +1000,32 @@ const fetchDetailedNondhInfo = async (nondhDetails: NondhDetail[]) => {
   const safeNondhNumber = (nondh: any): string => {
   return nondh.number ? nondh.number.toString() : '0';
 };
+
   useEffect(() => {
     fetchPassbookData()
     generateFilteredNondhs()
-  }, [yearSlabs, panipatraks, nondhs, nondhDetails, sNoFilter])
+  }, [yearSlabs, contextPanipatraks, nondhs, nondhDetails, sNoFilter])
+
+  // Fetch land record status
+useEffect(() => {
+  const fetchLandRecordStatus = async () => {
+    if (!recordId) return;
+    
+    try {
+      const { data, error } = await LandRecordService.getLandRecord(recordId);
+      if (error) throw error;
+      if (data) {
+        setLandRecordStatus(data.status || '');
+      }
+    } catch (error) {
+      console.error('Error fetching land record status:', error);
+    }
+  };
+
+  if (recordId) {
+    fetchLandRecordStatus();
+  }
+}, [recordId]);
 
   const fetchPassbookData = async () => {
   try {
@@ -741,7 +1331,7 @@ if (sNos && sNos.length > 0) {
       ...sortedData.map((row, index) => [
         index + 1,
         row.nondhNumber || '-',
-        row.nondhType || '-',
+        getNondhTypeDisplay(row.nondhType) || '-',
         row.date ? formatDate(row.date) : '-',
         row.vigat || '-',
         row.affectedSNosFormatted || '-',
@@ -1000,7 +1590,7 @@ if (sNos && sNos.length > 0) {
           </div>
           <div>
             <span className="text-muted-foreground">Type:</span>
-            <div className="font-medium">{nondh.type}</div>
+            <div className="font-medium">{getNondhTypeDisplay(nondh.type)}</div>
           </div>
         </div>
       </div>
@@ -1032,6 +1622,21 @@ if (sNos && sNos.length > 0) {
   );
 };
 
+// Helper function to get year periods
+const getYearPeriods = (startYear: number, endYear: number) => {
+  if (!startYear || !endYear) return [];
+  
+  const periods: { from: number; to: number; period: string }[] = [];
+  for (let y = startYear; y < endYear; y++) {
+    periods.push({ 
+      from: y, 
+      to: y + 1, 
+      period: `${y}-${y + 1}` 
+    });
+  }
+  return periods;
+};
+
   return (
   <Card className="w-full max-w-none">
     <CardHeader>
@@ -1049,22 +1654,110 @@ if (sNos && sNos.length > 0) {
       <Download className="w-4 h-4" />
       {isGeneratingPDF ? 'Generating...' : 'Download Integrated Document'}
     </Button>
-    <Button
-  onClick={exportToExcel}
-  className="flex items-center gap-2 w-full sm:w-auto"
-  variant="outline"
->
-  <Download className="w-4 h-4" />
-  Export Output
-</Button>
   </div>
-  <Tabs defaultValue="nondh-table" className="w-full">
-        <TabsList className="grid w-full grid-cols-4 mb-4">
-  <TabsTrigger value="nondh-table" className="text-xs sm:text-sm">Nondh Table</TabsTrigger>
-  <TabsTrigger value="query-list" className="text-xs sm:text-sm">Query List</TabsTrigger>
-  <TabsTrigger value="passbook" className="text-xs sm:text-sm">Passbook</TabsTrigger>
-  <TabsTrigger value="date-wise" className="text-xs sm:text-sm">Date-wise</TabsTrigger>
-</TabsList>
+<Tabs defaultValue="nondh-table" className="w-full">
+  <TabsList className="grid w-full grid-cols-5 mb-4">
+    <TabsTrigger value="nondh-table" className="text-xs sm:text-sm">Nondh Table</TabsTrigger>
+    <TabsTrigger value="query-list" className="text-xs sm:text-sm">Query List</TabsTrigger>
+    <TabsTrigger value="panipatraks" className="text-xs sm:text-sm">Panipatraks</TabsTrigger>
+    <TabsTrigger value="passbook" className="text-xs sm:text-sm">Passbook</TabsTrigger>
+    <TabsTrigger value="date-wise" className="text-xs sm:text-sm">Date-wise</TabsTrigger>
+  </TabsList>
+
+<TabsContent value="panipatraks" className="space-y-4">
+  <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-4">
+    <h3 className="text-base sm:text-lg font-semibold">
+      Panipatraks - Farmer Allotments
+    </h3>
+    <Button
+      onClick={handleExportPanipatraks}
+      className="flex items-center gap-2 w-full sm:w-auto"
+      variant="outline"
+      size="sm"
+    >
+      <Download className="w-4 h-4" />
+      Export Panipatraks
+    </Button>
+  </div>
+
+  {yearSlabs.length === 0 ? (
+    <div className="text-center py-8">
+      <p className="text-gray-500 text-sm">No year slabs found</p>
+    </div>
+  ) : (
+    <div className="rounded-md border overflow-x-auto">
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead className="w-1/4">Year(s)</TableHead>
+            <TableHead className="w-1/2">Farmer Name</TableHead>
+            <TableHead className="w-1/4">Area Alloted</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {yearSlabs.map((slab) => {
+  const slabPanipatraks = panipatraksState.filter(p => p.slabId === slab.id);
+            const periods = getYearPeriods(slab.startYear, slab.endYear);
+            const hasSameForAll = slabPanipatraks.length > 0 && 
+                                 slabPanipatraks.every(p => p.sameForAll === true);
+
+            if (hasSameForAll) {
+              const firstPeriodData = slabPanipatraks.find(p => p.year === periods[0]?.from);
+              if (!firstPeriodData?.farmers?.length) return null;
+
+              return firstPeriodData.farmers.map((farmer: any, farmerIndex: number) => {
+                const areaInSqM = farmer.area.unit === "sq_m" 
+                  ? farmer.area.value 
+                  : convertToSquareMeters(farmer.area.value, "sq_m");
+                
+                const acres = convertToSquareMeters(areaInSqM, "acre");
+                const guntha = convertToSquareMeters(areaInSqM, "guntha") % 40;
+
+                return (
+                  <TableRow key={`${slab.id}-all-${farmerIndex}`}>
+                    <TableCell className="font-medium">
+                      {farmerIndex === 0 ? `${slab.startYear}-${slab.endYear}` : ''}
+                    </TableCell>
+                    <TableCell>{farmer.name}</TableCell>
+                    <TableCell>
+                      {Math.round(areaInSqM * 100) / 100} sq.m ({Math.floor(acres)} acre {Math.round(guntha)} guntha)
+                    </TableCell>
+                  </TableRow>
+                );
+              });
+            } else {
+              return periods.flatMap((period) => {
+                const periodData = slabPanipatraks.find(p => p.year === period.from);
+                if (!periodData?.farmers?.length) return null;
+
+                return periodData.farmers.map((farmer: any, farmerIndex: number) => {
+                  const areaInSqM = farmer.area.unit === "sq_m" 
+                    ? farmer.area.value 
+                    : convertToSquareMeters(farmer.area.value, "sq_m");
+                  
+                  const acres = convertToSquareMeters(areaInSqM, "acre");
+                  const guntha = convertToSquareMeters(areaInSqM, "guntha") % 40;
+
+                  return (
+                    <TableRow key={`${slab.id}-${period.period}-${farmerIndex}`}>
+                      <TableCell className="font-medium">
+                        {farmerIndex === 0 ? period.period : ''}
+                      </TableCell>
+                      <TableCell>{farmer.name}</TableCell>
+                      <TableCell>
+                        {Math.round(areaInSqM * 100) / 100} sq.m ({Math.floor(acres)} acre {Math.round(guntha)} guntha)
+                      </TableCell>
+                    </TableRow>
+                  );
+                });
+              });
+            }
+          })}
+        </TableBody>
+      </Table>
+    </div>
+  )}
+</TabsContent>
 
 <TabsContent value="nondh-table" className="space-y-4">
   <div className="flex flex-col gap-4">
@@ -1075,7 +1768,15 @@ if (sNos && sNos.length > 0) {
       
       <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
         <SNoFilterComponent />
-       
+        <Button
+        onClick={exportToExcel}
+        className="flex items-center gap-2 w-full sm:w-auto"
+        variant="outline"
+        size="sm"
+      >
+        <Download className="w-4 h-4" />
+        Export Nondh Table
+      </Button>
       </div>
     </div>
   </div>
@@ -1172,7 +1873,7 @@ setAllNondhsDataState(sortedData);
                     <span className="text-red-600 font-medium">N/A</span>
                   )}
                 </TableCell>
-                <TableCell>{nondh.nondhType}</TableCell>
+                <TableCell>{getNondhTypeDisplay(nondh.nondhType)}</TableCell>
                 <TableCell>
   {nondh.nondhType === 'Hukam' ? (nondh.hukamType || '-') : '-'}
 </TableCell>
@@ -1272,7 +1973,15 @@ setAllNondhsDataState(sortedData);
               
               <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
                 <SNoFilterComponent />
-                
+                 <Button
+        onClick={handleExportQueryList}
+        className="flex items-center gap-2 w-full sm:w-auto"
+        variant="outline"
+        size="sm"
+      >
+        <Download className="w-4 h-4" />
+        Export Query List
+      </Button>
               </div>
             </div>
           </div>
@@ -1350,7 +2059,15 @@ setAllNondhsDataState(sortedData);
               
               <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
                 <SNoFilterComponent />
-                
+                <Button
+        onClick={handleExportPassbook}
+        className="flex items-center gap-2 w-full sm:w-auto"
+        variant="outline"
+        size="sm"
+      >
+        <Download className="w-4 h-4" />
+        Export Passbook
+      </Button>
               </div>
             </div>
           </div>
@@ -1406,6 +2123,15 @@ setAllNondhsDataState(sortedData);
               
               <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
                 <SNoFilterComponent />
+                <Button
+        onClick={handleExportDateWise}
+        className="flex items-center gap-2 w-full sm:w-auto"
+        variant="outline"
+        size="sm"
+      >
+        <Download className="w-4 h-4" />
+        Export Date-wise
+      </Button>
                 <div className="flex items-center gap-2">
                   <Filter className="w-4 h-4" />
                   <Label htmlFor="date-filter" className="text-sm whitespace-nowrap">Filter by Date:</Label>
@@ -1467,7 +2193,7 @@ setAllNondhsDataState(sortedData);
                             <TableCell>{formatDisplayDate(nondh.date || nondh.createdAt)}</TableCell>
                             <TableCell>{nondh.nondhNumber}</TableCell>
                             <TableCell>{nondh.affectedSNos || nondh.sNo}</TableCell>
-                            <TableCell>{nondh.type}</TableCell>
+                            <TableCell>{getNondhTypeDisplay(nondh.type)}</TableCell>
                             <TableCell>
                               <span
                                 className={`px-2 py-1 rounded text-xs ${getStatusColorClass(nondh.status)}`}
@@ -1499,16 +2225,86 @@ setAllNondhsDataState(sortedData);
         </TabsContent>
       </Tabs>
 
-      <div className="flex flex-col sm:flex-row sm:justify-center items-stretch sm:items-center gap-4 mt-6 pt-4 border-t">
-        <Button 
-          onClick={handleCompleteProcess}
-          className="w-full sm:w-auto"
-          size="sm"
-        >
-          Complete Process
-        </Button>
-      </div>
+    <div className="flex flex-col sm:flex-row sm:justify-center items-stretch sm:items-center gap-4 mt-6 pt-4 border-t">
+  
+  {/* Push for Review Button - Show for manager/admin/executioner when status is not 'review' */}
+  {(role === 'manager' || role === 'admin' || role === 'executioner') && landRecordStatus !== 'review' && (
+    <Button 
+      onClick={async () => {
+        if (!recordId || !user?.primaryEmailAddress?.emailAddress) {
+          toast({ title: "Missing required information", variant: "destructive" });
+          return;
+        }
+        try {
+          console.log('Pushing record for review...');
+          const { error } = await LandRecordService.updateLandRecord(recordId, { status: 'review' });
+          if (error) throw error;
+          
+          await createActivityLog({
+            user_email: user.primaryEmailAddress.emailAddress,
+            land_record_id: recordId,
+            step: 6,
+            chat_id: null,
+            description: `${role.charAt(0).toUpperCase() + role.slice(1)} pushed the record for review. Status changed to Review.`
+          });
+          
+          setLandRecordStatus('review');
+          toast({ title: "Record pushed for review. Status changed to Review." });
+        } catch (error) {
+          console.error('Error pushing for review:', error);
+          toast({ 
+            title: "Error pushing for review", 
+            description: error instanceof Error ? error.message : "Unknown error",
+            variant: "destructive" 
+          });
+        }
+      }}
+      className="w-full sm:w-auto flex items-center gap-2"
+      size="sm"
+    >
+      Push for Review
+    </Button>
+  )}
+  
+ {/* Send Message Button - Show for all roles with dynamic text */}
+<Button 
+  onClick={() => setShowCommentModal(true)}
+  className="w-full sm:w-auto flex items-center gap-2"
+  size="sm"
+  variant="outline"
+>
+  <Send className="w-4 h-4" />
+  {role === 'manager' || role === 'admin' 
+    ? 'Send Message to Executioner/Reviewer'
+    : role === 'executioner'
+    ? 'Send Message to Manager/Reviewer'
+    : 'Send Message'
+  }
+</Button>
+
+  {/* Complete Process Button */}
+  <Button 
+    onClick={handleCompleteProcess}
+    className="w-full sm:w-auto"
+    size="sm"
+  >
+    Complete Process
+  </Button>
+</div>
     </CardContent>
+
+    {/* Comment Modal */}
+{showCommentModal && (
+  <CommentModal
+    isOpen={showCommentModal}
+    onClose={() => setShowCommentModal(false)}
+    onSubmit={handleSendComment}
+    loading={sendingComment}
+    step={6}
+    userRole={role || ''}
+    landRecordStatus={landRecordStatus} 
+  />
+)}
   </Card>
 )
 }

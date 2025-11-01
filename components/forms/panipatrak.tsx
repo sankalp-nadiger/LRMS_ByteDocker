@@ -358,7 +358,7 @@ const FarmerCard = ({
 };
 
 export default function PanipatrakStep() {
-  const { yearSlabs, setCurrentStep, currentStep, landBasicInfo, mode, recordId } = useLandRecord();
+  const { yearSlabs, setCurrentStep, currentStep, landBasicInfo, mode, recordId, setPanipatraks } = useLandRecord();
   const { getStepData, updateStepData, reinitialize } = useStepFormData(3);
   const [loading, setLoading] = useState(false);
   const [isInitialized, setIsInitialized] = useState(false);
@@ -1072,9 +1072,11 @@ const updateFarmer = (
       allPanipatraks,
       sameForAllYears  // Pass the array here
     );
+    
 
     if (error) throw error;
 
+    setPanipatraks(allPanipatraks);
     await createActivityLog({
       user_email: user?.primaryEmailAddress?.emailAddress || "",
       land_record_id: landBasicInfo.id,

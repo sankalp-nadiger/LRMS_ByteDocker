@@ -14,6 +14,7 @@ import { useToast } from "@/hooks/use-toast"
 import { useRouter } from 'next/navigation'
 import { LandRecordService } from "@/lib/supabase"
 import type { Nondh } from "@/contexts/land-record-context"
+import { ref } from "process"
 
 const generateUUID = () => {
   return crypto.randomUUID();
@@ -33,7 +34,7 @@ function isEqual(obj1: any, obj2: any) {
 }
 
 export default function NondhAdd() {
-  const { recordId, yearSlabs, landBasicInfo, setHasUnsavedChanges, currentStep, setCurrentStep } = useLandRecord()
+  const { recordId, yearSlabs, landBasicInfo, setHasUnsavedChanges, currentStep, setCurrentStep, refreshStatus } = useLandRecord()
   const { toast } = useToast()
   const { user } = useUser()
   const router = useRouter()
@@ -391,6 +392,7 @@ export default function NondhAdd() {
 
       // Update original data
       setOriginalNondhs(validNondhs)
+      refreshStatus();
       toast({ title: "Nondh data saved successfully" })
       setCurrentStep(5);
     } catch (error) {

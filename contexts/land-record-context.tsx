@@ -150,6 +150,7 @@ interface LandRecordContextType {
   currentStep: number
   mode: 'add' | 'view' | 'edit'
   recordId?: string
+  setRecordId: (id: string | undefined) => void
   setCurrentStep: (step: number) => void
   canProceedToStep: (step: number) => boolean
   landBasicInfo: LandBasicInfo | null
@@ -177,15 +178,21 @@ const LandRecordContext = createContext<LandRecordContextType | undefined>(undef
 export function LandRecordProvider({ 
   children,
   mode = 'add',
-  recordId
+ recordId: initialRecordId
 }: { 
   children: ReactNode;
   mode?: 'add' | 'view' | 'edit';
   recordId?: string;
 }) {
   const [isLoading, setIsLoading] = useState(mode !== 'add');
-  
-  // Add useEffect to load data if in view/edit mode
+  const [recordId, setRecordId] = useState<string | undefined>(initialRecordId);
+
+    // ✅ UPDATE RECORD ID WHEN PROP CHANGES
+  useEffect(() => {
+    setRecordId(initialRecordId);
+  }, [initialRecordId]);
+
+  //useEffect to load data if in view/edit mode
 useEffect(() => {
   if (mode !== 'add' && recordId) {
     const loadData = async () => {
@@ -230,6 +237,7 @@ useEffect(() => {
     loadData();
   }
 }, [mode, recordId]);
+
   const [currentStep, setCurrentStep] = useState(1)
   const [landBasicInfo, setLandBasicInfo] = useState<LandBasicInfo | null>(null)
   const [yearSlabs, setYearSlabs] = useState<YearSlab[]>([])
@@ -344,8 +352,9 @@ useEffect(() => {
         hasUnsavedChanges,
         setHasUnsavedChanges,
         resetUnsavedChanges,
-        refreshStatus,  // ADD THIS LINE
-      statusRefreshTrigger
+        refreshStatus,
+        setRecordId,
+        statusRefreshTrigger
       }}
     >
       {children}

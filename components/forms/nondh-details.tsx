@@ -44,6 +44,28 @@ const statusTypes = [
   { value: "nullified", label: "Na manjoor (નામંજૂર)" }
 ]
 
+// Nondh type translations
+const nondhTypeTranslations: Record<string, string> = {
+  "Kabjedaar": "કબજેદાર",
+  "Ekatrikaran": "એકત્રીકરણ",
+  "Varsai": "વારસાઈ",
+  "Hayati_ma_hakh_dakhal": "હયાતીમા હક દાખલ",
+  "Hakkami": "હક કમી",
+  "Vechand": "વેચાણ",
+  "Durasti": "દુરસ્તી",
+  "Promulgation": "પ્રમોલગેશન",
+  "Hukam": "હુકમથી",
+  "Vehchani": "વેંચાણી",
+  "Bojo": "બોજો દાખલ",
+  "Other": "વસિયત"
+};
+
+// Function to get display text with Gujarati translation
+const getNondhTypeDisplay = (type: string): string => {
+  const gujaratiText = nondhTypeTranslations[type];
+  return gujaratiText ? `${type} (${gujaratiText})` : type;
+};
+
 const GUNTHAS_PER_ACRE = 40;
 const SQM_PER_GUNTHA = 101.1714; // Approx 1 guntha = 101.1714 sq meters
 const SQM_PER_ACRE = SQM_PER_GUNTHA * GUNTHAS_PER_ACRE; // Approx 1 acre = 4046.856 sq meters
@@ -2903,7 +2925,7 @@ case "Bojo":
                       {typeLabel} No: {typeof nondh.affectedSNos[0] === 'string' ? nondh.affectedSNos[0] : nondh.affectedSNos[0]?.number || ''}
                     </span>
                     <span className="text-xs px-1.5 py-0.5 bg-gray-100 dark:bg-gray-800 rounded">
-                      Type: {type}
+                      Type: {getNondhTypeDisplay(type)} 
                     </span>
                   </div>
                 </div>
@@ -3781,7 +3803,7 @@ if (insertError) throw insertError;
                 Nondh No: {sortedNondh.number}
               </h3>
               <span className="text-sm px-2 py-1 bg-blue-100 dark:bg-blue-900 rounded-full">
-                {nondhTypes.find(t => t === detail.type) || 'Nondh'}
+                {getNondhTypeDisplay(detail.type)}
               </span>
             </div>
             <div className="mt-2">
@@ -3908,7 +3930,7 @@ if (insertError) throw insertError;
     <SelectContent>
       {nondhTypes.map((type) => (
         <SelectItem key={type} value={type}>
-          {type}
+          {getNondhTypeDisplay(type)} 
         </SelectItem>
       ))}
     </SelectContent>

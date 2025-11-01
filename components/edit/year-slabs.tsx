@@ -244,7 +244,7 @@ export default function YearSlabs() {
     landBasicInfo, 
     currentStep,
     recordId,
-setHasUnsavedChanges,  } = useLandRecord();
+setHasUnsavedChanges, refreshStatus  } = useLandRecord();
   const { toast } = useToast();
   const { user } = useUser();
   
@@ -1188,6 +1188,7 @@ const handleSave = async () => {
     initialSlabsRef.current = JSON.parse(JSON.stringify(slabs));
     setModified(false);
     setHasUnsavedChanges(currentStep, false);
+    refreshStatus();
     toast({ title: "Year slabs saved successfully" });
     setCurrentStep(3);
   } catch (error) {

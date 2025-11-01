@@ -329,6 +329,28 @@ const CommentModal = ({ isOpen, onClose, onSubmit, loading = false, step, userRo
   );
 };
 
+// Nondh type translations
+const nondhTypeTranslations: Record<string, string> = {
+  "Kabjedaar": "કબજેદાર",
+  "Ekatrikaran": "એકત્રીકરણ",
+  "Varsai": "વારસાઈ",
+  "Hayati_ma_hakh_dakhal": "હયાતીમા હક દાખલ",
+  "Hakkami": "હક કમી",
+  "Vechand": "વેચાણ",
+  "Durasti": "દુરસ્તી",
+  "Promulgation": "પ્રમોલગેશન",
+  "Hukam": "હુકમથી",
+  "Vehchani": "વેંચાણી",
+  "Bojo": "બોજો દાખલ",
+  "Other": "વસિયત"
+};
+
+// Function to get display text with Gujarati translation
+const getNondhTypeDisplay = (type: string): string => {
+  const gujaratiText = nondhTypeTranslations[type];
+  return gujaratiText ? `${type} (${gujaratiText})` : type;
+};
+
 export default function OutputViews() {
   const { landBasicInfo, recordId, yearSlabs, refreshStatus } = useLandRecord()
   const { toast } = useToast()
@@ -1196,7 +1218,7 @@ const handleExportDateWise = async () => {
         ...detail,
         nondhNumber: nondh?.number || 0,
         affectedSNosFormatted: formatAffectedSNos(affectedSNosRaw),
-        nondhType: nondh?.type || detail.type,
+        nondhType:  getNondhTypeDisplay(nondh?.type || detail.type),
         hukamType: detail.hukamType || detail.subType || '-',
       }
     })
@@ -1443,8 +1465,8 @@ const handleExportDateWise = async () => {
             </div>
           </div>
           <div>
-            <span className="text-muted-foreground">Type:</span>
-            <div className="font-medium">{nondh.type}</div>
+            <span className="text-muted-foreground">Nondh Type:</span>
+            <div className="font-medium">{getNondhTypeDisplay(nondh.type)}</div>
           </div>
         </div>
       </div>
@@ -1608,7 +1630,7 @@ const handleExportDateWise = async () => {
                       <span className="text-red-600 font-medium">N/A</span>
                     )}
                   </TableCell>
-                  <TableCell>{nondh.nondhType}</TableCell>
+                  <TableCell>{getNondhTypeDisplay(nondh.nondhType)}</TableCell>
                   <TableCell className="text-sm">
                     {nondh.type === 'Hukam' ? (nondh.hukamType || '-') : '-'}
                   </TableCell>
@@ -1653,7 +1675,7 @@ const handleExportDateWise = async () => {
                   <div className="space-y-1">
                     <div className="font-medium text-sm">Nondh #{nondh.nondhNumber}</div>
                     <div className="text-muted-foreground text-xs">
-                      Type: {nondh.nondhType}
+                      Type: {getNondhTypeDisplay(nondh.nondhType)}
                       {nondh.nondhType === 'Hukam' && nondh.hukamType && nondh.hukamType !== '-' && (
                         <span> - {nondh.hukamType}</span>
                       )}
@@ -2019,7 +2041,7 @@ const handleExportDateWise = async () => {
                           <TableHead>Date</TableHead>
                           <TableHead>Nondh No.</TableHead>
                           <TableHead>Affected S.No</TableHead>
-                          <TableHead>Type</TableHead>
+                          <TableHead>Nondh Type</TableHead>
                           <TableHead>Status</TableHead>
                           <TableHead>Show in Output</TableHead>
                         </TableRow>
@@ -2030,7 +2052,7 @@ const handleExportDateWise = async () => {
                             <TableCell>{formatDate(nondh.date)}</TableCell>
                             <TableCell>{nondh.nondhNumber}</TableCell>
                             <TableCell>{nondh.affectedSNos || nondh.sNo}</TableCell>
-                            <TableCell>{nondh.type}</TableCell>
+                            <TableCell>{getNondhTypeDisplay(nondh.type)}</TableCell>
                             <TableCell>
                               <span
                                 className={`px-2 py-1 rounded text-xs ${getStatusColorClass(nondh.status)}`}

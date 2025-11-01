@@ -50,6 +50,27 @@ export default function NondhDetails() {
         return 'Pramaanik (પ્રમાણિત)'
     }
   }
+  // Nondh type translations
+const nondhTypeTranslations: Record<string, string> = {
+  "Kabjedaar": "કબજેદાર",
+  "Ekatrikaran": "એકત્રીકરણ",
+  "Varsai": "વારસાઈ",
+  "Hayati_ma_hakh_dakhal": "હયાતી માં હાક દાખલ",
+  "Hakkami": "હક્કામી",
+  "Vechand": "વેચાણ",
+  "Durasti": "દુરસ્તી",
+  "Promulgation": "પ્રોમલ્ગેશન",
+  "Hukam": "હુકમ",
+  "Vehchani": "વેંચાણી",
+  "Bojo": "બોજો",
+  "Other": "અન્ય"
+};
+
+// Function to get display text with Gujarati translation
+const getNondhTypeDisplay = (type: string): string => {
+  const gujaratiText = nondhTypeTranslations[type];
+  return gujaratiText ? `${type} (${gujaratiText})` : type;
+};
 
   React.useEffect(() => {
     addDebugLog("NondhDetails component mounted")
@@ -511,7 +532,7 @@ const getPrimarySNoType = (affectedSNos: string[]): string => {
                         {getStatusLabel(detail.status)}
                       </Badge>
                       <span className="text-sm px-2 py-1 bg-blue-100 dark:bg-blue-900 rounded-full">
-                        {detail.type}
+                        {getNondhTypeDisplay(detail.type)} 
                       </span>
                     </div>
                     <div className="mt-2">
@@ -598,7 +619,7 @@ const getPrimarySNoType = (affectedSNos: string[]): string => {
                         
                         <div>
                           <Label>Nondh Type</Label>
-                          <p className="mt-1">{detail.type}</p>
+                          <p className="mt-1">{getNondhTypeDisplay(detail.type)}</p>
                         </div>
                        
                         <div>

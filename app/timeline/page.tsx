@@ -13,8 +13,7 @@ import {
   updateLandRecordStatus
 } from '@/lib/supabase';
 import { supabase } from '@/lib/supabase';
-import { RefreshCw, MessageCircle, Send, CheckCircle, ExternalLink, AlertCircle } from 'lucide-react';
-import { is } from 'date-fns/locale';
+import { RefreshCw, MessageCircle, Send, CheckCircle, ExternalLink, AlertCircle, X } from 'lucide-react';
 
 interface User {
   id: string;
@@ -799,10 +798,13 @@ const handleConfirmCompletion = async () => {
               className="w-full px-4 py-2.5 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white pr-10 appearance-none"
             >
               {lands.map(land => (
-                <option key={land.id} value={land.id}>
-                  District: {land.district} | Taluk: {land.taluk} | Village: {land.village} | Block: {land.block_no} | Status: {land.status.charAt(0).toUpperCase() + land.status.slice(1)}
-                </option>
-              ))}
+  <option key={land.id} value={land.id}>
+    District: {land.district} | Taluk: {land.taluka} | Village: {land.village} | Block No: {land.block_no} | Status:{' '}
+    {land.status === 'review2'
+      ? 'External Review'
+      : land.status.charAt(0).toUpperCase() + land.status.slice(1)}
+  </option>
+))}
             </select>
             <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
               <svg className="h-5 w-5 text-gray-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
@@ -1249,8 +1251,18 @@ const handleConfirmCompletion = async () => {
       {/* Completion Modal */}
 {showCompletionModal && (
   <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-    <div className="bg-white rounded-lg p-6 w-full max-w-lg max-h-[90vh] overflow-y-auto">
-      <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
+    <div className="bg-white rounded-lg p-6 w-full max-w-lg max-h-[90vh] overflow-y-auto relative">
+      {/* Close Button */}
+      <button
+        onClick={() => setShowCompletionModal(false)}
+        disabled={isSendingExternalReview}
+        className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+        aria-label="Close modal"
+      >
+        <X className="h-5 w-5" />
+      </button>
+
+      <h3 className="text-lg font-semibold mb-4 flex items-center gap-2 pr-8">
         <CheckCircle className="h-5 w-5 text-green-600" />
         Mark Land Record as Completed
       </h3>

@@ -182,7 +182,7 @@ const CommentModal = ({ isOpen, onClose, onSubmit, loading = false, step }: Comm
       <Card className="w-full max-w-lg max-h-[80vh] overflow-hidden flex flex-col">
         <CardHeader className="flex-shrink-0 border-b bg-white sticky top-0 z-10">
           <div className="flex justify-between items-center">
-            <CardTitle>Send Message to Executioner - Step {step}</CardTitle>
+            <CardTitle>Assign to Executioner</CardTitle>
             <Button
               variant="ghost"
               size="sm"
@@ -224,7 +224,7 @@ const CommentModal = ({ isOpen, onClose, onSubmit, loading = false, step }: Comm
                 type="text"
                 value={message}
                 onChange={handleMessageChange}
-                placeholder="Type @ to mention someone or send to all executioners..."
+                placeholder="Type @ to mention someone or send a thread to all..."
                 disabled={loading}
                 onKeyPress={(e) => e.key === 'Enter' && !showMentionDropdown && handleSubmit()}
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
@@ -252,7 +252,7 @@ const CommentModal = ({ isOpen, onClose, onSubmit, loading = false, step }: Comm
               )}
             </div>
             <p className="text-xs text-gray-500">
-              Type @ to mention specific users, or send to all executioners
+              Type @ to mention specific users
             </p>
           </div>
           
@@ -275,7 +275,7 @@ const CommentModal = ({ isOpen, onClose, onSubmit, loading = false, step }: Comm
               ) : (
                 <Send className="w-4 h-4" />
               )}
-              Send Message
+              Send & Assign
             </Button>
           </div>
         </CardContent>
