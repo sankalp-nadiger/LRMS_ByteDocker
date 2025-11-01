@@ -20,11 +20,20 @@ const pathMap: Record<string, string> = {
   "/land-notice/details": "Land Notice Details",
   "/passbook": "Passbook Ledger",
   "/reports": "Reports & Queries",
+  "/brokers": "Brokers",
+  "/brokers/new": "Add Broker",
+  "/brokers/update": "Update",
 }
+
+// UUID pattern to filter out dynamic IDs
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 export function Breadcrumbs() {
   const pathname = usePathname()
-  const pathSegments = pathname.split("/").filter(Boolean)
+  const pathSegments = pathname
+    .split("/")
+    .filter(Boolean)
+    .filter(segment => !UUID_PATTERN.test(segment)) // Filter out UUIDs
 
   return (
     <Breadcrumb>

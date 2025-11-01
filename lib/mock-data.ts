@@ -1,5 +1,3 @@
-// Mock data for development - replace with actual API calls later
-
 export interface District {
   id: string
   name: string

@@ -12,14 +12,12 @@ import {
 import { Progress } from "@/components/ui/progress";
 import { CheckCircle, Circle } from "lucide-react";
 
-// Import your actual forms from LRMS_Forms-main
 import LandBasicInfoComponent from "./land-basic-info";
 import YearSlabs from "./year-slabs";
 import Panipatrak from "./panipatrak";
 import NondhAdd from "./nondh-add";
 import NondhDetails from "./nondh-details";
 import OutputViews from "./output-views";
-
 interface FormStep {
   id: number;
   title: string;
@@ -27,7 +25,7 @@ interface FormStep {
 }
 
 export function LandFormsContainer() {
-  const [activeStep, setActiveStep] = useState(1);
+  const { currentStep, setCurrentStep } = useLandRecord();
   const [completedSteps, setCompletedSteps] = useState<Set<number>>(new Set());
 
   const steps: FormStep[] = [
@@ -59,17 +57,35 @@ export function LandFormsContainer() {
     },
   ];
 
+  // Sync local activeStep with context currentStep
+  const [activeStep, setActiveStep] = useState(currentStep || 1);
+
+  useEffect(() => {
+    if (currentStep && currentStep !== activeStep) {
+      setActiveStep(currentStep);
+    }
+  }, [currentStep, activeStep]);
+
+  const handleStepChange = (stepId: number) => {
+    setActiveStep(stepId);
+    setCurrentStep(stepId);
+  };
+
   const handleNext = () => {
     const currentIndex = steps.findIndex((step) => step.id === activeStep);
     if (currentIndex < steps.length - 1) {
-      setActiveStep(steps[currentIndex + 1].id);
+      const nextStep = steps[currentIndex + 1].id;
+      setActiveStep(nextStep);
+      setCurrentStep(nextStep);
     }
   };
 
   const handlePrevious = () => {
     const currentIndex = steps.findIndex((step) => step.id === activeStep);
     if (currentIndex > 0) {
-      setActiveStep(steps[currentIndex - 1].id);
+      const prevStep = steps[currentIndex - 1].id;
+      setActiveStep(prevStep);
+      setCurrentStep(prevStep);
     }
   };
 
@@ -122,10 +138,10 @@ export function LandFormsContainer() {
                 key={step.id}
                 variant={activeStep === step.id ? "default" : "outline"}
                 size="sm"
-                onClick={() => setActiveStep(step.id)}
+                onClick={() => handleStepChange(step.id)}
                 className="flex items-center gap-2"
               >
-                {activeStep > step.id ? (
+                {completedSteps.has(step.id) || activeStep > step.id ? (
                   <CheckCircle className="w-4 h-4" />
                 ) : (
                   <Circle className="w-4 h-4" />
