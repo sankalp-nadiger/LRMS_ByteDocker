@@ -306,14 +306,6 @@ export default function TasksDashboard() {
             chat_id: taskId,
             description: `Task completed by ${userEmail}. Task: "${currentChat.message}"`,
           });
-
-          await createChat({
-            from_email: currentChat.to_email,
-            to_email: currentChat.from_email,
-            message: currentChat.message,
-            land_record_id: currentChat.land_record_id,
-            step: currentChat.step,
-          });
         }
       }
 
@@ -364,16 +356,29 @@ export default function TasksDashboard() {
 
   const headerConfig = getHeaderConfig();
 
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900 mx-auto mb-3"></div>
-          <p className="text-sm text-gray-600">Loading your {role === 'reviewer' ? 'reviews' : role === 'executioner' ? 'tasks' : 'messages'}...</p>
-        </div>
+ // Check if user is not signed in
+if (!user) {
+  return (
+    <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+      <div className="text-center">
+        <User className="h-16 w-16 text-gray-400 mx-auto mb-4" />
+        <h2 className="text-2xl font-bold text-gray-900 mb-2">Sign In Required</h2>
+        <p className="text-sm text-gray-600">Please sign in to access your dashboard</p>
       </div>
-    );
-  }
+    </div>
+  );
+}
+
+if (loading) {
+  return (
+    <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+      <div className="text-center">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900 mx-auto mb-3"></div>
+        <p className="text-sm text-gray-600">Loading your {role === 'reviewer' ? 'reviews' : role === 'executioner' ? 'tasks' : 'messages'}...</p>
+      </div>
+    </div>
+  );
+}
 
   return (
     <div className="min-h-screen bg-gray-50 p-4">

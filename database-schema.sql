@@ -57,15 +57,6 @@ CREATE TABLE slab_entries (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
--- Create farmers table
-CREATE TABLE farmers (
-    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
-    name VARCHAR(255) NOT NULL,
-    area_value DECIMAL(10,4) NOT NULL,
-    area_unit VARCHAR(10) NOT NULL CHECK (area_unit IN ('acre', 'guntha', 'sq_m'))
-);
-
 -- Create panipatrak table
 CREATE TABLE panipatraks (
     id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
@@ -156,7 +147,9 @@ CREATE TABLE brokers (
     status VARCHAR(10) NOT NULL CHECK (status IN ('active', 'inactive')),
     remarks TEXT,
     recent_task TEXT,
-    residence TEXT DEFAULT ''
+    residence TEXT DEFAULT '',
+    connected_by VARCHAR(255),
+    connected_by_other TEXT
 );
 
 -- Linking table: many-to-many between brokers and land_records
