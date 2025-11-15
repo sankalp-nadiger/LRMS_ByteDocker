@@ -5,6 +5,7 @@ import { useUser } from '@clerk/nextjs';
 import { CheckCircle2, Circle, MapPin, Calendar, User, AlertCircle, Filter, MessageSquare, ClipboardCheck, FileSearch, RefreshCw } from 'lucide-react';
 import { createChat, createActivityLog , supabase } from '@/lib/supabase';
 import { useUserRole } from '@/contexts/user-context';
+import { useRouter } from 'next/navigation';
 
 interface LandRecord {
   id: string;
@@ -42,6 +43,7 @@ export default function TasksDashboard() {
   const [completingTask, setCompletingTask] = useState<string | null>(null);
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const { role } = useUserRole();
+  const router = useRouter();
 
   useEffect(() => {
     if (role) {
@@ -538,10 +540,18 @@ if (loading) {
                         {role === 'reviewer' ? 'Comments' : role === 'executioner' ? 'Tasks' : 'Messages'}
                       </h3>
                       {group.tasks.map((task) => (
-                        <div
-                          key={task.id}
-                          className="group relative bg-gray-50 border border-gray-300 rounded-lg p-3 hover:border-gray-900 hover:shadow-sm transition-all duration-300"
-                        >
+  <div
+    key={task.id}
+    onClick={() => {
+      if (role === 'executioner') {
+        const step = task.step || 1;
+        router.push(`/land-master/forms?mode=edit&id=${task.land_record_id}&step=${step}&message=${encodeURIComponent(task.message)}`);
+      }
+    }}
+    className={`group relative bg-gray-50 border border-gray-300 rounded-lg p-3 hover:border-gray-900 hover:shadow-sm transition-all duration-300 ${
+      role === 'executioner' ? 'cursor-pointer' : ''
+    }`}
+  >
                           <div className="flex items-start gap-3">
                             {/* Checkbox (only for executioner) */}
                             {role === 'executioner' && (
