@@ -696,65 +696,68 @@ export default function LandBasicInfoComponent() {
   const hasChanges = !isEqual(formData, originalData)
 
   // Fetch existing land record data
-  useEffect(() => {
-    const fetchLandRecord = async () => {
-      if (!recordId) {
-        setIsDataLoaded(true)
-        return
-      }
-
-      try {
-        setLoading(true)
-        const { data, error } = await LandRecordService.getLandRecord(recordId)
-        
-        if (error) throw error
-        
-        if (data) {
-          const areaValueSqm = data.area_value || 0;
-          
-          const mappedData: LandBasicInfo = {
-            id: data.id,
-            district: data.district || "",
-            taluka: data.taluka || "",
-            village: data.village || "",
-            area: { 
-              value: areaValueSqm,
-              unit: "sq_m",
-              acres: areaValueSqm ? Math.floor(areaValueSqm / 4046.86) : undefined,
-              gunthas: areaValueSqm ? Math.round((areaValueSqm / 101.17) % 40) : undefined,
-              square_meters: areaValueSqm,
-              sq_m: areaValueSqm
-            },
-            sNoType: data.s_no_type || "s_no",
-            sNo: data.s_no || "",
-            isPromulgation: data.is_promulgation || false,
-            blockNo: data.block_no || "",
-            reSurveyNo: data.re_survey_no || "",
-            integrated712: data.integrated_712 || "",
-            integrated712FileName: data.integrated_712_filename || ""
-          }
-          
-          setFormData(mappedData)
-          setOriginalData(mappedData)
-          
-          if (mappedData.integrated712FileName) {
-            setUploadedFileName(mappedData.integrated712FileName)
-          }
-        }
-      } catch (error) {
-        console.error('Error fetching land record:', error)
-        toast({ 
-          title: "Error loading land record", 
-          variant: "destructive" 
-        })
-      } finally {
-        setLoading(false)
-        setIsDataLoaded(true)
-      }
+useEffect(() => {
+  const fetchLandRecord = async () => {
+    if (!recordId) {
+      setIsDataLoaded(true)
+      return
     }
 
-    fetchLandRecord()
-  }, [recordId, toast])
+    try {
+      setLoading(true)
+      const { data, error } = await LandRecordService.getLandRecord(recordId)
+      
+      if (error) throw error
+      
+      if (data) {
+        const areaValueSqm = data.area_value || 0;
+        
+        // Check promulgation status from mock data
+        const isProm = isPromulgation(data.district, data.taluka, data.village)
+        
+        const mappedData: LandBasicInfo = {
+          id: data.id,
+          district: data.district || "",
+          taluka: data.taluka || "",
+          village: data.village || "",
+          area: { 
+            value: areaValueSqm,
+            unit: "sq_m",
+            acres: areaValueSqm ? Math.floor(areaValueSqm / 4046.86) : undefined,
+            gunthas: areaValueSqm ? Math.round((areaValueSqm / 101.17) % 40) : undefined,
+            square_meters: areaValueSqm,
+            sq_m: areaValueSqm
+          },
+          sNoType: data.s_no_type || "s_no",
+          sNo: data.s_no || "",
+          isPromulgation: isProm, // Use calculated value from mock data
+          blockNo: data.block_no || "",
+          reSurveyNo: data.re_survey_no || "",
+          integrated712: data.integrated_712 || "",
+          integrated712FileName: data.integrated_712_filename || ""
+        }
+        
+        setFormData(mappedData)
+        setOriginalData(mappedData)
+        
+        if (mappedData.integrated712FileName) {
+          setUploadedFileName(mappedData.integrated712FileName)
+        }
+      }
+    } catch (error) {
+      console.error('Error fetching land record:', error)
+      toast({ 
+        title: "Error loading land record", 
+        variant: "destructive" 
+      })
+    } finally {
+      setLoading(false)
+      setIsDataLoaded(true)
+    }
+  }
+
+  fetchLandRecord()
+}, [recordId, toast])
 
   // Update unsaved changes status
   useEffect(() => {
@@ -1098,14 +1101,14 @@ export default function LandBasicInfoComponent() {
           </div>
 
           {/* Promulgation Display */}
-          {formData.village && formData.isPromulgation !== null && (
-            <div>
-              <Label>Promulgation Status:</Label>{" "}
-              <span className={formData.isPromulgation ? "text-green-600" : "text-red-600"}>
-                {formData.isPromulgation ? "Yes" : "No"}
-              </span>
-            </div>
-          )}
+{formData.village && formData.isPromulgation !== null && (
+  <div>
+    <Label>Promulgation Status:</Label>{" "}
+    <span className={formData.isPromulgation ? "text-green-600" : "text-red-600"}>
+      {formData.isPromulgation ? "Yes" : "No"}
+    </span>
+  </div>
+)}
 
           {/* Block No */}
           <div className="space-y-2">
@@ -1118,20 +1121,20 @@ export default function LandBasicInfoComponent() {
             />
           </div>
 
-          {/* Re Survey No */}
-          {formData.isPromulgation && (
-            <div className="p-4 border rounded-lg bg-blue-50">
-              <div className="space-y-2">
-                <Label htmlFor="re-survey-no">Re Survey No *</Label>
-                <Input
-                  id="re-survey-no"
-                  value={formData.reSurveyNo}
-                  onChange={(e) => updateFormField({ reSurveyNo: e.target.value })}
-                  placeholder="Enter Re Survey No"
-                />
-              </div>
-            </div>
-          )}
+          {/* Re Survey No - Only show if promulgation is true */}
+{formData.isPromulgation && (
+  <div className="p-4 border rounded-lg bg-blue-50">
+    <div className="space-y-2">
+      <Label htmlFor="re-survey-no">Re Survey No *</Label>
+      <Input
+        id="re-survey-no"
+        value={formData.reSurveyNo}
+        onChange={(e) => updateFormField({ reSurveyNo: e.target.value })}
+        placeholder="Enter Re Survey No"
+      />
+    </div>
+  </div>
+)}
 
           {/* Document Upload */}
           <div className="space-y-2">

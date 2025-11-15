@@ -14,7 +14,9 @@ export default function AddBrokerForm() {
     status: 'active',
     remarks: '',
     recentTask: '',
-    residence: '' 
+    residence: '',
+    connectedBy: '',
+    connectedByOther: ''
   });
   const router = useRouter();
   const [errors, setErrors] = useState({});
@@ -38,62 +40,72 @@ export default function AddBrokerForm() {
       newErrors.rating = 'Rating must be between 0 and 5';
     }
 
+    if (formData.connectedBy === 'Other' && !formData.connectedByOther.trim()) {
+      newErrors.connectedByOther = 'Please specify the connection method';
+    }
+
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
 
-  const handleSubmit = async () => {
-  if (!validateForm()) {
-    return;
-  }
-
-  setIsSubmitting(true);
-  setSubmitStatus(null);
-
-  try {
-    // Prepare data for Supabase
-    const dataToSubmit = {
-      name: formData.name.trim(),
-      phone_number: formData.phoneNumber.trim(),
-      area: formData.area.trim() || null,
-      rating: formData.rating ? parseFloat(formData.rating) : null,
-      status: formData.status,
-      remarks: formData.remarks.trim() || null,
-      recent_task: formData.recentTask.trim() || null,
-      residence: formData.residence.trim() || null
-    };
-
-    // Insert into Supabase
-    const { data, error } = await supabase
-      .from('brokers')
-      .insert([dataToSubmit])
-      .select();
-
-    if (error) {
-      throw error;
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    
+    if (!validateForm()) {
+      return;
     }
 
-    setSubmitStatus('success');
-    router.push('/brokers');
-    // Reset form
-    setFormData({
-      name: '',
-      phoneNumber: '',
-      area: '',
-      rating: '',
-      status: 'active',
-      remarks: '',
-      recentTask: '',
-      residence: ''
-    });
-    setErrors({});
-  } catch (error) {
-    setSubmitStatus('error');
-    console.error('Error saving broker:', error);
-  } finally {
-    setIsSubmitting(false);
-  }
-};
+    setIsSubmitting(true);
+    setSubmitStatus(null);
+
+    try {
+      // Prepare data for Supabase
+      const dataToSubmit = {
+        name: formData.name.trim(),
+        phone_number: formData.phoneNumber.trim(),
+        area: formData.area.trim() || null,
+        rating: formData.rating ? parseFloat(formData.rating) : null,
+        status: formData.status,
+        remarks: formData.remarks.trim() || null,
+        recent_task: formData.recentTask.trim() || null,
+        residence: formData.residence.trim() || null,
+        connected_by: formData.connectedBy || null,
+        connected_by_other: formData.connectedBy === 'Other' ? formData.connectedByOther.trim() : null
+      };
+
+      // Insert into Supabase
+      const { data, error } = await supabase
+        .from('brokers')
+        .insert([dataToSubmit])
+        .select();
+
+      if (error) {
+        throw error;
+      }
+
+      setSubmitStatus('success');
+      router.push('/brokers');
+      // Reset form
+      setFormData({
+        name: '',
+        phoneNumber: '',
+        area: '',
+        rating: '',
+        status: 'active',
+        remarks: '',
+        recentTask: '',
+        residence: '',
+        connectedBy: '',
+        connectedByOther: ''
+      });
+      setErrors({});
+    } catch (error) {
+      setSubmitStatus('error');
+      console.error('Error saving broker:', error);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -101,6 +113,15 @@ export default function AddBrokerForm() {
       ...prev,
       [name]: value
     }));
+    
+    // Clear connectedByOther when changing connectedBy to non-Other value
+    if (name === 'connectedBy' && value !== 'Other') {
+      setFormData(prev => ({
+        ...prev,
+        connectedByOther: ''
+      }));
+    }
+    
     // Clear error for this field
     if (errors[name]) {
       setErrors(prev => ({
@@ -218,20 +239,61 @@ export default function AddBrokerForm() {
               </div>
             </div>
 
-                {/* Residence */}
-<div className="mb-6">
-  <label className="block text-sm font-medium text-gray-700 mb-2">
-    Residence
-  </label>
-  <input
-    type="text"
-    name="residence"
-    value={formData.residence}
-    onChange={handleChange}
-    placeholder="Enter residence"
-    className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-  />
-</div>
+            {/* Residence */}
+            <div className="mb-6">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Residence
+              </label>
+              <input
+                type="text"
+                name="residence"
+                value={formData.residence}
+                onChange={handleChange}
+                placeholder="Enter residence"
+                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+
+            {/* Connected By */}
+            <div className="mb-6">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Connected By
+              </label>
+              <select
+                name="connectedBy"
+                value={formData.connectedBy}
+                onChange={handleChange}
+                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+              >
+                <option value="">Select connection method</option>
+                <option value="Paper Advertising">Paper Advertising</option>
+                <option value="Reff Person">Reff Person</option>
+                <option value="Whatsapp Group">Whatsapp Group</option>
+                <option value="Other">Other</option>
+              </select>
+            </div>
+
+            {/* Connected By Other - Conditional Field */}
+            {formData.connectedBy === 'Other' && (
+              <div className="mb-6">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Please Specify <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  name="connectedByOther"
+                  value={formData.connectedByOther}
+                  onChange={handleChange}
+                  placeholder="Enter connection method"
+                  className={`w-full px-4 py-2.5 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                    errors.connectedByOther ? 'border-red-500' : 'border-gray-300'
+                  }`}
+                />
+                {errors.connectedByOther && (
+                  <p className="mt-1 text-sm text-red-600">{errors.connectedByOther}</p>
+                )}
+              </div>
+            )}
 
             {/* Status */}
             <div className="mb-6">

@@ -814,9 +814,10 @@ const handleConfirmCompletion = async () => {
           </div>
         </div>
 
-        {/* Two Column Grid - Activity Log and Chat */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
+        {/* Conditional Grid - Two columns for managers/admins, single column for others */}
+<div className={`grid grid-cols-1 ${['manager', 'admin'].includes(userRole || '') ? 'lg:grid-cols-2' : ''} gap-4 mb-4`}>
           {/* Activity Log Column */}
+          {['manager', 'admin'].includes(userRole || '') && (
           <div className="bg-white rounded-lg shadow p-5">
             <h2 className="text-xl font-semibold mb-4">Activity Log</h2>
             
@@ -913,6 +914,7 @@ const handleConfirmCompletion = async () => {
               </div>
             </div>
           </div>
+          )}
 
           {/* Chat Column */}
           <div className="bg-white rounded-lg shadow p-5 flex flex-col" style={{ height: '600px' }}>

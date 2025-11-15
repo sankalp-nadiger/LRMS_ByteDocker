@@ -60,6 +60,8 @@ interface BrokerData {
   recent_task: string;
   remarks: string;
   residence: string;
+  connected_by: string;
+  connected_by_other: string;
 }
 
 export default function BrokerUpdatePage({ 
@@ -87,6 +89,8 @@ export default function BrokerUpdatePage({
     recent_task: "",
     remarks: "",
     residence: "",
+    connected_by: "",
+    connected_by_other: "",
   });
   
   const [landRecords, setLandRecords] = useState<BrokerLandRecord[]>([]);
@@ -96,58 +100,78 @@ export default function BrokerUpdatePage({
   }, [resolvedParams.id]);
 
   const fetchBrokerData = async () => {
-  try {
-    setLoading(true);
-    setError(null);
+    try {
+      setLoading(true);
+      setError(null);
 
-    const { data: broker, error: brokerError } = await supabase
-      .from("brokers")
-      .select("*")
-      .eq("id", resolvedParams.id)
-      .single();
+      const { data: broker, error: brokerError } = await supabase
+        .from("brokers")
+        .select("*")
+        .eq("id", resolvedParams.id)
+        .single();
 
-    if (brokerError) throw brokerError;
-    setBrokerData(broker);
+      if (brokerError) throw brokerError;
+      setBrokerData({
+        ...broker,
+        name: broker.name || "",
+        phone_number: broker.phone_number || "",
+        area: broker.area || "",
+        status: broker.status || "active",
+        recent_task: broker.recent_task || "",
+        remarks: broker.remarks || "",
+        residence: broker.residence || "",
+        connected_by: broker.connected_by || "",
+        connected_by_other: broker.connected_by_other || "",
+      });
 
-    const { data: lands, error: landsError } = await supabase
-  .from("broker_land_records")
-  .select(`
-    id,
-    land_record_id,
-    last_offer,
-    next_update,
-    status,
-    land_records!inner (
-      id,
-      district,
-      taluka,
-      village,
-      area_value,
-      area_unit,
-      block_no,
-      re_survey_no
-    )
-  `)
-  .eq("broker_id", resolvedParams.id);
+      const { data: lands, error: landsError } = await supabase
+        .from("broker_land_records")
+        .select(`
+          id,
+          land_record_id,
+          last_offer,
+          next_update,
+          status,
+          land_records!inner (
+            id,
+            district,
+            taluka,
+            village,
+            area_value,
+            area_unit,
+            block_no,
+            re_survey_no
+          )
+        `)
+        .eq("broker_id", resolvedParams.id);
 
-    if (landsError) throw landsError;
+      if (landsError) throw landsError;
 
-    // Filter by landId if provided in searchParams
-    const filteredLands = landId 
-      ? (lands || []).filter(land => land.land_record_id === landId)
-      : (lands || []);
+      // Filter by landId if provided in searchParams
+      const filteredLands = landId 
+        ? (lands || []).filter(land => land.land_record_id === landId)
+        : (lands || []);
 
-    setLandRecords(filteredLands as BrokerLandRecord[]);
-  } catch (err) {
-    console.error("Error fetching broker data:", err);
-    setError(err instanceof Error ? err.message : "Failed to fetch broker data");
-  } finally {
-    setLoading(false);
-  }
-};
+      setLandRecords(filteredLands as BrokerLandRecord[]);
+    } catch (err) {
+      console.error("Error fetching broker data:", err);
+      setError(err instanceof Error ? err.message : "Failed to fetch broker data");
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleBrokerChange = (field: string, value: any) => {
-    setBrokerData((prev) => ({ ...prev, [field]: value }));
+    setBrokerData((prev) => {
+      const updated = { ...prev, [field]: value };
+      
+      // Clear connected_by_other when changing connected_by to non-Other value
+      if (field === "connected_by" && value !== "Other") {
+        updated.connected_by_other = "";
+      }
+      
+      return updated;
+    });
   };
 
   const handleLandChange = (landId: string, field: string, value: any) => {
@@ -174,7 +198,9 @@ export default function BrokerUpdatePage({
           status: brokerData.status,
           recent_task: brokerData.recent_task,
           remarks: brokerData.remarks,
-          residence: brokerData.residence, 
+          residence: brokerData.residence,
+          connected_by: brokerData.connected_by && brokerData.connected_by !== "none" ? brokerData.connected_by : null,
+          connected_by_other: brokerData.connected_by === "Other" ? brokerData.connected_by_other : null,
           updated_at: new Date().toISOString(),
         })
         .eq("id", resolvedParams.id);
@@ -344,15 +370,17 @@ export default function BrokerUpdatePage({
                 placeholder="0.0 - 5.0"
               />
             </div>
-      <div className="space-y-2">
-  <Label htmlFor="residence">Residence</Label>
-  <Input
-    id="residence"
-    value={brokerData.residence}
-    onChange={(e) => handleBrokerChange("residence", e.target.value)}
-    placeholder="Enter residence"
-  />
-</div>
+
+            <div className="space-y-2">
+              <Label htmlFor="residence">Residence</Label>
+              <Input
+                id="residence"
+                value={brokerData.residence}
+                onChange={(e) => handleBrokerChange("residence", e.target.value)}
+                placeholder="Enter residence"
+              />
+            </div>
+
             <div className="space-y-2">
               <Label htmlFor="status">Status *</Label>
               <Select
@@ -368,6 +396,37 @@ export default function BrokerUpdatePage({
                 </SelectContent>
               </Select>
             </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="connected_by">Connected By</Label>
+              <Select
+                value={brokerData.connected_by || "none"}
+                onValueChange={(value) => handleBrokerChange("connected_by", value === "none" ? "" : value)}
+              >
+                <SelectTrigger id="connected_by">
+                  <SelectValue placeholder="Select connection method" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Not selected</SelectItem>
+                  <SelectItem value="Paper Advertising">Paper Advertising</SelectItem>
+                  <SelectItem value="Reff Person">Reff Person</SelectItem>
+                  <SelectItem value="Whatsapp Group">Whatsapp Group</SelectItem>
+                  <SelectItem value="Other">Other</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {brokerData.connected_by === "Other" && (
+              <div className="space-y-2">
+                <Label htmlFor="connected_by_other">Please Specify *</Label>
+                <Input
+                  id="connected_by_other"
+                  value={brokerData.connected_by_other}
+                  onChange={(e) => handleBrokerChange("connected_by_other", e.target.value)}
+                  placeholder="Enter connection method"
+                />
+              </div>
+            )}
           </div>
 
           <div className="space-y-2">
@@ -396,16 +455,16 @@ export default function BrokerUpdatePage({
 
       <Card>
         <CardHeader>
-  <CardTitle>
-    {landId ? "Selected Land Assignment" : `Assigned Lands (${landRecords.length})`}
-  </CardTitle>
-  <CardDescription>
-    {landId 
-      ? "View and update information for the selected land assignment"
-      : "View and Update information for each land assignment"
-    }
-  </CardDescription>
-</CardHeader>
+          <CardTitle>
+            {landId ? "Selected Land Assignment" : `Assigned Lands (${landRecords.length})`}
+          </CardTitle>
+          <CardDescription>
+            {landId 
+              ? "View and update information for the selected land assignment"
+              : "View and Update information for each land assignment"
+            }
+          </CardDescription>
+        </CardHeader>
         <CardContent className="space-y-4">
           {landRecords.length === 0 ? (
             <p className="text-sm text-muted-foreground italic text-center py-8">
@@ -414,64 +473,64 @@ export default function BrokerUpdatePage({
           ) : (
             landRecords.map((land, index) => (
               <Card 
-  key={land.id} 
-  className={`p-4 ${landId && land.land_record_id === landId ? 'border-2 border-blue-500 bg-blue-50' : ''}`}
->
-  <div className="space-y-4">
-    <div className="flex justify-between items-start">
-      <div>
-        <h4 className="font-semibold text-base">
-          {landId && land.land_record_id === landId 
-            ? "Selected Land Details" 
-            : `Land ${index + 1}`
-          }
-        </h4>
-        <p className="text-sm text-muted-foreground">
-          {land.land_records.district} • {land.land_records.village}
-        </p>
-      </div>
-      <Badge variant="outline">{land.status}</Badge>
-    </div>
+                key={land.id} 
+                className={`p-4 ${landId && land.land_record_id === landId ? 'border-2 border-blue-500 bg-blue-50' : ''}`}
+              >
+                <div className="space-y-4">
+                  <div className="flex justify-between items-start">
+                    <div>
+                      <h4 className="font-semibold text-base">
+                        {landId && land.land_record_id === landId 
+                          ? "Selected Land Details" 
+                          : `Land ${index + 1}`
+                        }
+                      </h4>
+                      <p className="text-sm text-muted-foreground">
+                        {land.land_records.district} • {land.land_records.village}
+                      </p>
+                    </div>
+                    <Badge variant="outline">{land.status}</Badge>
+                  </div>
 
                   <Separator />
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-  <div className="space-y-1">
-    <Label className="text-xs text-muted-foreground">District</Label>
-    <p className="text-sm font-medium">{land.land_records.district}</p>
-  </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs text-muted-foreground">District</Label>
+                      <p className="text-sm font-medium">{land.land_records.district}</p>
+                    </div>
 
-  <div className="space-y-1">
-    <Label className="text-xs text-muted-foreground">Taluka</Label>
-    <p className="text-sm font-medium">{land.land_records.taluka}</p>
-  </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs text-muted-foreground">Taluka</Label>
+                      <p className="text-sm font-medium">{land.land_records.taluka}</p>
+                    </div>
 
-  <div className="space-y-1">
-    <Label className="text-xs text-muted-foreground">Village</Label>
-    <p className="text-sm font-medium">{land.land_records.village}</p>
-  </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs text-muted-foreground">Village</Label>
+                      <p className="text-sm font-medium">{land.land_records.village}</p>
+                    </div>
 
-  <div className="space-y-1">
-    <Label className="text-xs text-muted-foreground">Area</Label>
-    <p className="text-sm font-medium">
-      {land.land_records.area_value} {land.land_records.area_unit}
-    </p>
-  </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs text-muted-foreground">Area</Label>
+                      <p className="text-sm font-medium">
+                        {land.land_records.area_value} {land.land_records.area_unit}
+                      </p>
+                    </div>
 
-  {land.land_records.block_no && (
-    <div className="space-y-1">
-      <Label className="text-xs text-muted-foreground">Block No</Label>
-      <p className="text-sm font-medium">{land.land_records.block_no}</p>
-    </div>
-  )}
+                    {land.land_records.block_no && (
+                      <div className="space-y-1">
+                        <Label className="text-xs text-muted-foreground">Block No</Label>
+                        <p className="text-sm font-medium">{land.land_records.block_no}</p>
+                      </div>
+                    )}
 
-  {land.land_records.re_survey_no && (
-    <div className="space-y-1">
-      <Label className="text-xs text-muted-foreground">Re-Survey No</Label>
-      <p className="text-sm font-medium">{land.land_records.re_survey_no}</p>
-    </div>
-  )}
-</div>
+                    {land.land_records.re_survey_no && (
+                      <div className="space-y-1">
+                        <Label className="text-xs text-muted-foreground">Re-Survey No</Label>
+                        <p className="text-sm font-medium">{land.land_records.re_survey_no}</p>
+                      </div>
+                    )}
+                  </div>
 
                   <Separator />
 

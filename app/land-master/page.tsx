@@ -913,16 +913,16 @@ const handleSubmitBrokerLink = async () => {
                       )}
                     </>
                   )}
-                  {role !== 'reviewer' && (
-                    <Button 
-                      variant="ghost" 
-                      size="sm"
-                      onClick={() => handleDeleteClick(land)}
-                      className="text-red-600 hover:text-red-800 hover:bg-red-50"
-                    >
-                      Delete
-                    </Button>
-                  )}
+                  {role !== 'reviewer' && role !== 'executioner' && (
+  <Button 
+    variant="ghost" 
+    size="sm"
+    onClick={() => handleDeleteClick(land)}
+    className="text-red-600 hover:text-red-800 hover:bg-red-50"
+  >
+    Delete
+  </Button>
+)}
                 </div>
               </TableCell>
             </TableRow>
@@ -1032,14 +1032,16 @@ const handleSubmitBrokerLink = async () => {
                   )}
                 </>
               )}
-              <Button 
-                variant="outline" 
-                size="sm" 
-                className="flex-1 text-red-600 border-red-200 hover:bg-red-50 hover:text-red-700"
-                onClick={() => handleDeleteClick(land)}
-              >
-                Delete
-              </Button>
+              {role !== 'reviewer' && role !== 'executioner' && (
+  <Button 
+    variant="outline" 
+    size="sm" 
+    className="flex-1 text-red-600 border-red-200 hover:bg-red-50 hover:text-red-700"
+    onClick={() => handleDeleteClick(land)}
+  >
+    Delete
+  </Button>
+)}
             </div>
           </div>
         </Card>

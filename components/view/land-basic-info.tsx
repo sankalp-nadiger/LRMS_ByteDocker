@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import { Download, Eye, FileText } from "lucide-react"
 import { useLandRecord } from "@/contexts/land-record-context"
+import { isPromulgation } from "@/lib/mock-data"
 import { LandRecordService } from "@/lib/supabase"
 import { useToast } from "@/hooks/use-toast"
 import type { LandBasicInfo } from "@/contexts/land-record-context"
@@ -18,54 +19,57 @@ export default function LandBasicInfoComponent() {
   const [loading, setLoading] = useState(true)
 
   // Fetch land record data
-  useEffect(() => {
-    const fetchLandRecord = async () => {
-      if (!recordId) {
-        setLoading(false)
-        return
-      }
-
-      try {
-        const { data, error } = await LandRecordService.getLandRecord(recordId)
-        
-        if (error) throw error
-        
-        if (data) {
-          const mappedData: LandBasicInfo = {
-            id: data.id,
-            district: data.district || "",
-            taluka: data.taluka || "",
-            village: data.village || "",
-            area: { 
-  value: data.area_value || 0, 
-  unit: data.area_unit || "sq_m",
-  acres: data.area_unit === 'acre' ? data.area_value : undefined,
-  gunthas: data.area_unit === 'guntha' ? data.area_value : undefined,
-  square_meters: data.area_unit === 'sq_m' ? data.area_value : undefined
-},
-            sNoType: data.s_no_type || "s_no",
-            sNo: data.s_no || "",
-            isPromulgation: data.is_promulgation || false,
-            blockNo: data.block_no || "",
-            reSurveyNo: data.re_survey_no || "",
-            integrated712: data.integrated_712 || "",
-            integrated712FileName: data.integrated_712_filename || ""
-          }
-          setLandData(mappedData)
-        }
-      } catch (error) {
-        console.error('Error fetching land record:', error)
-        toast({ 
-          title: "Error loading land record", 
-          variant: "destructive" 
-        })
-      } finally {
-        setLoading(false)
-      }
+useEffect(() => {
+  const fetchLandRecord = async () => {
+    if (!recordId) {
+      setLoading(false)
+      return
     }
 
-    fetchLandRecord()
-  }, [recordId, toast])
+    try {
+      const { data, error } = await LandRecordService.getLandRecord(recordId)
+      
+      if (error) throw error
+      
+      if (data) {
+        // Check promulgation status from mock data
+        const isProm = isPromulgation(data.district, data.taluka, data.village)
+        
+        const mappedData: LandBasicInfo = {
+          id: data.id,
+          district: data.district || "",
+          taluka: data.taluka || "",
+          village: data.village || "",
+          area: { 
+            value: data.area_value || 0, 
+            unit: data.area_unit || "sq_m",
+            acres: data.area_unit === 'acre' ? data.area_value : undefined,
+            gunthas: data.area_unit === 'guntha' ? data.area_value : undefined,
+            square_meters: data.area_unit === 'sq_m' ? data.area_value : undefined
+          },
+          sNoType: data.s_no_type || "s_no",
+          sNo: data.s_no || "",
+          isPromulgation: isProm, // Use calculated value from mock data
+          blockNo: data.block_no || "",
+          reSurveyNo: data.re_survey_no || "",
+          integrated712: data.integrated_712 || "",
+          integrated712FileName: data.integrated_712_filename || ""
+        }
+        setLandData(mappedData)
+      }
+    } catch (error) {
+      console.error('Error fetching land record:', error)
+      toast({ 
+        title: "Error loading land record", 
+        variant: "destructive" 
+      })
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  fetchLandRecord()
+}, [recordId, toast])
 
   const handleFileDownload = () => {
     if (landData?.integrated712) {
