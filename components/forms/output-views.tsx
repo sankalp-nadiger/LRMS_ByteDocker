@@ -1495,7 +1495,7 @@ if (sNos && sNos.length > 0) {
         
         <div className="grid grid-cols-2 gap-2 text-sm">
           <div>
-            <span className="text-muted-foreground">Nondh Doc:</span>
+            <span className="text-muted-foreground">Nondh:</span>
             <div className={`font-medium p-1 rounded ${!nondh.nondhDocUrl ? 'bg-red-100' : ''}`}>
               {nondh.nondhDocUrl ? (
                 <span className="text-green-600 text-xl">✓</span>
@@ -1846,7 +1846,7 @@ setAllNondhsDataState(sortedData);
           <TableHeader>
             <TableRow>
               <TableHead>Nondh No.</TableHead>
-              <TableHead>Nondh Doc</TableHead>
+              <TableHead>Nondh</TableHead>
               <TableHead>Nondh Type</TableHead>
               <TableHead>Hukam Type</TableHead>
               <TableHead>Vigat</TableHead>
@@ -1919,7 +1919,7 @@ setAllNondhsDataState(sortedData);
               
               <div className="grid grid-cols-2 gap-2 text-sm">
                 <div>
-                  <span className="text-muted-foreground">Nondh Doc:</span>
+                  <span className="text-muted-foreground">Nondh:</span>
                   <div className={`font-medium p-1 rounded ${!nondh.nondhDocUrl ? 'bg-red-100' : ''}`}>
                     {nondh.nondhDocUrl ? (
                       <Button 
@@ -2000,7 +2000,7 @@ setAllNondhsDataState(sortedData);
                   <TableHeader>
   <TableRow>
     <TableHead>Nondh No.</TableHead>
-    <TableHead>Nondh Doc</TableHead>
+    <TableHead>Nondh</TableHead>
     <TableHead>Relevant Docs Available</TableHead>
     <TableHead>Relevant Docs</TableHead>
   </TableRow>

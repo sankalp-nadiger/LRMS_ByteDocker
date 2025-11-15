@@ -28,6 +28,7 @@ interface NotificationChat {
   land_record_id: string;
   from_email: string;
   created_at: string;
+  step?: number;
   land_record?: LandRecord;
 }
 
@@ -91,21 +92,36 @@ export function NotificationsMenu() {
   }, [user]);
 
   const handleNotificationClick = async (chat: NotificationChat) => {
-    if (!user?.primaryEmailAddress?.emailAddress) return;
+  if (!user?.primaryEmailAddress?.emailAddress) return;
 
-    try {
-      // Mark as read
-      await markChatAsRead(chat.id, user.primaryEmailAddress.emailAddress);
+  try {
+    const userEmail = user.primaryEmailAddress.emailAddress;
+    
+    // Mark as read
+    await markChatAsRead(chat.id, userEmail);
+    
+    // Update local state
+    setUnreadChats(prev => prev.filter(c => c.id !== chat.id));
+    
+    // Check if step exists and user role
+    if (chat.step) {
+      // Get user role from Clerk
+      const userRole = user.publicMetadata?.role as string || '';
       
-      // Update local state
-      setUnreadChats(prev => prev.filter(c => c.id !== chat.id));
-      
-      // Navigate to timeline with the specific land record
-      router.push(`/timeline?landId=${chat.land_record_id}`);
-    } catch (error) {
-      console.error('Error marking chat as read:', error);
+      // If user is executioner, navigate to edit mode
+      if (userRole === 'executioner') {
+        const message = `Regarding: ${chat.message.substring(0, 50)}${chat.message.length > 50 ? '...' : ''}`;
+        router.push(`/land-master/forms?mode=edit&id=${chat.land_record_id}&step=${chat.step}&message=${encodeURIComponent(message)}`);
+        return;
+      }
     }
-  };
+    
+    // Otherwise, navigate to timeline
+    router.push(`/timeline?landId=${chat.land_record_id}`);
+  } catch (error) {
+    console.error('Error handling notification click:', error);
+  }
+};
 
   return (
     <DropdownMenu>
