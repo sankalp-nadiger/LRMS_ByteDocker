@@ -76,9 +76,10 @@ interface CommentModalProps {
   userRole: string;
   landRecordStatus?: string;
   isPushForReview?: boolean;
+  isMarkReviewComplete?: boolean; 
 }
 
-const CommentModal = ({ isOpen, onClose, onSubmit, loading = false, step, userRole, landRecordStatus, isPushForReview = false }: CommentModalProps) => {
+const CommentModal = ({ isOpen, onClose, onSubmit, loading = false, step, userRole, landRecordStatus, isPushForReview = false, isMarkReviewComplete = false }: CommentModalProps) => {
   const [message, setMessage] = useState('');
   const [showMentionDropdown, setShowMentionDropdown] = useState(false);
   const [mentionSearch, setMentionSearch] = useState('');
@@ -97,7 +98,7 @@ const CommentModal = ({ isOpen, onClose, onSubmit, loading = false, step, userRo
   : `Send Message to Executioner/Reviewer - Step ${step}`;
 
   // Fetch users when modal opens
-  useEffect(() => {
+ useEffect(() => {
   if (isOpen) {
     const fetchUsers = async () => {
       try {
@@ -114,14 +115,14 @@ const CommentModal = ({ isOpen, onClose, onSubmit, loading = false, step, userRo
     setMessage('');
     setSelectedRecipients([]);
     setShowMentionDropdown(false);
-    // Set isReviewComplete based on status OR isPushForReview prop
+    // Set isReviewComplete based on status OR isPushForReview/isMarkReviewComplete props
     if (userRole === 'reviewer') {
-      setIsReviewComplete(landRecordStatus === 'review');
+      setIsReviewComplete(isMarkReviewComplete); // CHANGED: Use isMarkReviewComplete prop
     } else {
-      setIsReviewComplete(isPushForReview); // CHANGED: Use isPushForReview prop instead of false
+      setIsReviewComplete(isPushForReview);
     }
   }
-}, [isOpen, landRecordStatus, userRole, isPushForReview]); // ADD isPushForReview to dependencies
+}, [isOpen, landRecordStatus, userRole, isPushForReview, isMarkReviewComplete]); // ADD isMarkReviewComplete to dependencies
 
   const handleMessageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value;
@@ -273,7 +274,7 @@ const CommentModal = ({ isOpen, onClose, onSubmit, loading = false, step, userRo
             </p>
           </div>
          {userRole === 'reviewer' ? (
-  landRecordStatus === 'review' && ( // ADD THIS CONDITION
+  landRecordStatus === 'review' && ( 
     <div className="flex items-center gap-2 p-3 bg-blue-50 border border-blue-200 rounded-lg">
       <input
         type="checkbox"
@@ -288,7 +289,7 @@ const CommentModal = ({ isOpen, onClose, onSubmit, loading = false, step, userRo
     </div>
   )
 ) : (userRole === 'manager' || userRole === 'admin' || userRole === 'executioner') && (
-  landRecordStatus !== 'review' && ( // ADD THIS CONDITION
+  landRecordStatus !== 'review' && (
     <div className="flex items-center gap-2 p-3 bg-green-50 border border-green-200 rounded-lg">
       <input
         type="checkbox"
@@ -373,7 +374,7 @@ export default function OutputViews() {
   const [sendingComment, setSendingComment] = useState(false)
   const [landRecordStatus, setLandRecordStatus] = useState<string>('');
 const [isPushForReview, setIsPushForReview] = useState(false)
-  
+  const [isMarkReviewComplete, setIsMarkReviewComplete] = useState(false) 
   // Fetch land record status
 useEffect(() => {
   const fetchLandRecordStatus = async () => {
@@ -2087,45 +2088,31 @@ const handleExportDateWise = async () => {
 
          <div className="flex flex-col sm:flex-row sm:justify-center items-stretch sm:items-center gap-4 mt-6 pt-4 border-t">
   {role === 'reviewer' ? (
-    landRecordStatus === 'review' && (
-      <Button 
-        onClick={async () => {
-          if (!recordId || !user?.primaryEmailAddress?.emailAddress) return;
-          try {
-            await LandRecordService.updateLandRecord(recordId, { status: 'query' });
-            await createActivityLog({
-              user_email: user.primaryEmailAddress.emailAddress,
-              land_record_id: recordId,
-              step: 6,
-              chat_id: null,
-              description: 'Reviewer marked the review as complete.'
-            });
-            setLandRecordStatus('query');
-            toast({ title: "Review marked as complete." });
-            refreshStatus();
-            router.push('/land-master');
-          } catch (error) {
-            console.error('Error marking review complete:', error);
-            toast({ title: "Error marking review complete", variant: "destructive" });
-          }
-        }}
-        className="w-full sm:w-auto flex items-center gap-2"
-        size="sm"
-      >
-        Mark Review Complete
-      </Button>
-    )
-  ) : (role === 'manager' || role === 'admin' || role === 'executioner') && (
-  landRecordStatus !== 'review' && (
+  landRecordStatus === 'review' && (
     <Button 
       onClick={() => {
-        setIsPushForReview(true); // SET THIS BEFORE OPENING MODAL
+        setIsMarkReviewComplete(true); // SET THIS BEFORE OPENING MODAL
+        setIsPushForReview(false); // RESET THE OTHER FLAG
         setShowCommentModal(true);
       }}
       className="w-full sm:w-auto flex items-center gap-2"
       size="sm"
     >
-      Push for Review
+      Add Remark & Mark Review Complete
+    </Button>
+  )
+  ) : (role === 'manager' || role === 'admin' || role === 'executioner') && (
+  landRecordStatus !== 'review' && (
+    <Button 
+      onClick={() => {
+        setIsPushForReview(true); // SET THIS BEFORE OPENING MODAL
+        setIsMarkReviewComplete(false);
+        setShowCommentModal(true);
+      }}
+      className="w-full sm:w-auto flex items-center gap-2"
+      size="sm"
+    >
+      Add comment & Push for Review
     </Button>
   )
 )}
@@ -2133,6 +2120,7 @@ const handleExportDateWise = async () => {
   {(role === 'manager' || role === 'admin' || role === 'reviewer' || role === 'executioner') && (
     <Button 
       onClick={() => {
+        setIsMarkReviewComplete(false);
       setIsPushForReview(false); // RESET THE FLAG
       setShowCommentModal(true);
     }}
@@ -2172,6 +2160,7 @@ const handleExportDateWise = async () => {
           userRole={role || ''}
           landRecordStatus={landRecordStatus} 
           isPushForReview={isPushForReview}
+          isMarkReviewComplete={isMarkReviewComplete}
         />
       )}
     </>
