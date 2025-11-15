@@ -75,9 +75,10 @@ interface CommentModalProps {
   step: number;
   userRole: string;
   landRecordStatus?: string;
+  isPushForReview?: boolean;
 }
 
-const CommentModal = ({ isOpen, onClose, onSubmit, loading = false, step, userRole, landRecordStatus }: CommentModalProps) => {
+const CommentModal = ({ isOpen, onClose, onSubmit, loading = false, step, userRole, landRecordStatus,isPushForReview = false  }: CommentModalProps) => {
   const [message, setMessage] = useState('');
   const [showMentionDropdown, setShowMentionDropdown] = useState(false);
   const [mentionSearch, setMentionSearch] = useState('');
@@ -88,6 +89,7 @@ const CommentModal = ({ isOpen, onClose, onSubmit, loading = false, step, userRo
   const { user } = useUser();
   const inputRef = useRef<HTMLInputElement>(null);
 
+
   // Determine the modal title based on user role
   const modalTitle = userRole === 'reviewer'
   ? `Send Message to Manager/Executioner - Step ${step}`
@@ -96,30 +98,30 @@ const CommentModal = ({ isOpen, onClose, onSubmit, loading = false, step, userRo
   : `Send Message to Executioner/Reviewer - Step ${step}`;
   // Fetch users when modal opens
   useEffect(() => {
-    if (isOpen) {
-      const fetchUsers = async () => {
-        try {
-          const response = await fetch('/api/users/list');
-          if (!response.ok) throw new Error('Failed to fetch users');
-          const data = await response.json();
-          setUsers(data.users);
-        } catch (error) {
-          console.error('Error fetching users:', error);
-        }
-      };
-      fetchUsers();
-      // Reset state when modal opens
-      setMessage('');
-      setSelectedRecipients([]);
-      setShowMentionDropdown(false);
-      // Set isReviewComplete based on status
+  if (isOpen) {
+    const fetchUsers = async () => {
+      try {
+        const response = await fetch('/api/users/list');
+        if (!response.ok) throw new Error('Failed to fetch users');
+        const data = await response.json();
+        setUsers(data.users);
+      } catch (error) {
+        console.error('Error fetching users:', error);
+      }
+    };
+    fetchUsers();
+    // Reset state when modal opens
+    setMessage('');
+    setSelectedRecipients([]);
+    setShowMentionDropdown(false);
+    // Set isReviewComplete based on status OR isPushForReview prop
     if (userRole === 'reviewer') {
       setIsReviewComplete(landRecordStatus === 'review');
     } else {
-      setIsReviewComplete(false);
+      setIsReviewComplete(isPushForReview); // CHANGED: Use isPushForReview prop instead of false
     }
-    }
-}, [isOpen, landRecordStatus, userRole]); 
+  }
+}, [isOpen, landRecordStatus, userRole, isPushForReview]);
 
   const handleMessageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value;
@@ -286,7 +288,7 @@ const CommentModal = ({ isOpen, onClose, onSubmit, loading = false, step, userRo
     </div>
   )
 ) : (userRole === 'manager' || userRole === 'admin' || userRole === 'executioner') && (
-  landRecordStatus !== 'review' && ( // ADD THIS CONDITION
+  landRecordStatus !== 'review' && ( 
     <div className="flex items-center gap-2 p-3 bg-green-50 border border-green-200 rounded-lg">
       <input
         type="checkbox"
@@ -370,7 +372,7 @@ export default function OutputViews() {
   const [showCommentModal, setShowCommentModal] = useState(false)
   const [sendingComment, setSendingComment] = useState(false)
   const [landRecordStatus, setLandRecordStatus] = useState<string>('');
-
+const [isPushForReview, setIsPushForReview] = useState(false)
   
   // Fetch land record status
 useEffect(() => {
@@ -1378,7 +1380,7 @@ const handleExportDateWise = async () => {
         
         <div className="grid grid-cols-2 gap-2 text-sm">
           <div>
-            <span className="text-muted-foreground">Nondh Doc:</span>
+            <span className="text-muted-foreground">Nondh:</span>
             <div className={`font-medium p-1 rounded ${!nondh.nondhDocUrl ? 'bg-red-100' : ''}`}>
               {nondh.nondhDocUrl ? (
                 <span className="text-green-600 text-xl">✓</span>
@@ -1602,7 +1604,7 @@ const handleExportDateWise = async () => {
             <TableHeader>
               <TableRow>
                 <TableHead className="w-20">Nondh No.</TableHead>
-                <TableHead className="w-24">Nondh Doc</TableHead>
+                <TableHead className="w-24">Nondh</TableHead>
                 <TableHead className="w-24">Nondh Type</TableHead>
                 <TableHead className="w-20">Hukam Type</TableHead>
                 <TableHead className="w-[300px]">Vigat</TableHead>
@@ -1688,7 +1690,7 @@ const handleExportDateWise = async () => {
                 
                 <div className="grid grid-cols-2 gap-2 text-sm">
                   <div>
-                    <span className="text-muted-foreground">Nondh Doc:</span>
+                    <span className="text-muted-foreground">Nondh:</span>
                     <div className={`font-medium p-1 rounded ${!nondh.nondhDocUrl ? 'bg-red-100' : ''}`}>
                       {nondh.nondhDocUrl ? (
                         <Button 
@@ -1875,7 +1877,7 @@ const handleExportDateWise = async () => {
                     <TableHeader>
   <TableRow>
     <TableHead>Nondh No.</TableHead>
-    <TableHead>Nondh Doc</TableHead>
+    <TableHead>Nondh</TableHead>
     <TableHead>Relevant Docs Available</TableHead>
     <TableHead>Relevant Docs</TableHead>
   </TableRow>
@@ -2116,25 +2118,9 @@ const handleExportDateWise = async () => {
   ) : (role === 'manager' || role === 'admin' || role === 'executioner') && (
     landRecordStatus !== 'review' && (
       <Button 
-        onClick={async () => {
-          if (!recordId || !user?.primaryEmailAddress?.emailAddress) return;
-          try {
-            await LandRecordService.updateLandRecord(recordId, { status: 'review' });
-            await createActivityLog({
-              user_email: user.primaryEmailAddress.emailAddress,
-              land_record_id: recordId,
-              step: 6,
-              chat_id: null,
-              description: `${role.charAt(0).toUpperCase() + role.slice(1)} pushed the record for review. Status changed to Review.`
-            });
-            setLandRecordStatus('review'); // UPDATE LOCAL STATE
-            toast({ title: "Record pushed for review. Status changed to Review." });
-            refreshStatus();
-            router.push('/land-master');
-          } catch (error) {
-            console.error('Error pushing for review:', error);
-            toast({ title: "Error pushing for review", variant: "destructive" });
-          }
+        onClick={() => {
+          setIsPushForReview(true);
+          setShowCommentModal(true);
         }}
         className="w-full sm:w-auto flex items-center gap-2"
         size="sm"
@@ -2143,10 +2129,14 @@ const handleExportDateWise = async () => {
       </Button>
     )
   )}
+
   {/* END NEW SECTION */}
   {(role === 'manager' || role === 'admin' || role === 'reviewer' || role === 'executioner') && (
     <Button 
-      onClick={() => setShowCommentModal(true)}
+      onClick={() => {
+      setIsPushForReview(false); // RESET THE FLAG
+      setShowCommentModal(true);
+    }}
       className="w-full sm:w-auto flex items-center gap-2"
       size="sm"
       variant="outline"
@@ -2182,6 +2172,7 @@ const handleExportDateWise = async () => {
           step={6}
           userRole={role || ''}
           landRecordStatus={landRecordStatus} 
+          isPushForReview={isPushForReview} 
         />
       )}
     </>
