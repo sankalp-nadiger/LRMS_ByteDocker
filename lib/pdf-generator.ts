@@ -114,7 +114,7 @@ export class IntegratedDocumentGenerator {
           ekatrikaran
         `)
         .eq('land_record_id', landRecordId)
-        .order('start_year', { ascending: false })
+        .order('start_year', { ascending: true })
         
       if (slabsError) throw slabsError
       

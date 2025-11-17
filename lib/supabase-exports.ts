@@ -12,7 +12,6 @@ interface ProjectExportData {
 }
 
 // Base export function for Panipatraks
-// In lib/supabase-exports.ts - update the panipatraks export function
 export const exportPanipatraksToExcel = async (
   panipatraksData: any[], 
   landBasicInfo: any,
@@ -37,8 +36,8 @@ export const exportPanipatraksToExcel = async (
       ['Year(s)', 'Farmer Name', 'Area Alloted'] // Column headers
     ];
 
-    // Add panipatrak data in table format
-    yearSlabs.forEach((slab) => {
+    // Add panipatrak data in table format - sort by start year ascending
+[...yearSlabs].sort((a, b) => a.startYear - b.startYear).forEach((slab) => {
       const slabPanipatraks = panipatraksData.filter(p => p.slabId === slab.id);
       const periods = getYearPeriods(slab.startYear, slab.endYear);
       const hasSameForAll = slabPanipatraks.length > 0 && 

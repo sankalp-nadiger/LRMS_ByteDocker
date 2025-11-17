@@ -16,6 +16,10 @@ CREATE TABLE land_records (
     block_no VARCHAR(255),
     re_survey_no VARCHAR(255),
     integrated_712 VARCHAR(255),
+
+    -- Added fields
+    added_by TEXT,
+    authority TEXT,
     
     -- Status
     status VARCHAR(20) DEFAULT 'initiated' 
