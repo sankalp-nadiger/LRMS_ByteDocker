@@ -23,6 +23,8 @@ export interface LandBasicInfo {
   reSurveyNo: string
   integrated712: string
   integrated712FileName: string
+  addedBy?: string
+  authority?: string
 }
 
 export interface SlabEntry {

@@ -19,57 +19,58 @@ export default function LandBasicInfoComponent() {
   const [loading, setLoading] = useState(true)
 
   // Fetch land record data
-useEffect(() => {
-  const fetchLandRecord = async () => {
-    if (!recordId) {
-      setLoading(false)
-      return
-    }
-
-    try {
-      const { data, error } = await LandRecordService.getLandRecord(recordId)
-      
-      if (error) throw error
-      
-      if (data) {
-        // Check promulgation status from mock data
-        const isProm = isPromulgation(data.district, data.taluka, data.village)
-        
-        const mappedData: LandBasicInfo = {
-          id: data.id,
-          district: data.district || "",
-          taluka: data.taluka || "",
-          village: data.village || "",
-          area: { 
-            value: data.area_value || 0, 
-            unit: data.area_unit || "sq_m",
-            acres: data.area_unit === 'acre' ? data.area_value : undefined,
-            gunthas: data.area_unit === 'guntha' ? data.area_value : undefined,
-            square_meters: data.area_unit === 'sq_m' ? data.area_value : undefined
-          },
-          sNoType: data.s_no_type || "s_no",
-          sNo: data.s_no || "",
-          isPromulgation: isProm, // Use calculated value from mock data
-          blockNo: data.block_no || "",
-          reSurveyNo: data.re_survey_no || "",
-          integrated712: data.integrated_712 || "",
-          integrated712FileName: data.integrated_712_filename || ""
-        }
-        setLandData(mappedData)
+  useEffect(() => {
+    const fetchLandRecord = async () => {
+      if (!recordId) {
+        setLoading(false)
+        return
       }
-    } catch (error) {
-      console.error('Error fetching land record:', error)
-      toast({ 
-        title: "Error loading land record", 
-        variant: "destructive" 
-      })
-    } finally {
-      setLoading(false)
-    }
-  }
 
-  fetchLandRecord()
-}, [recordId, toast])
+      try {
+        const { data, error } = await LandRecordService.getLandRecord(recordId)
+        
+        if (error) throw error
+        
+        if (data) {
+          // Check promulgation status from mock data
+          const isProm = isPromulgation(data.district, data.taluka, data.village)
+          
+          const mappedData: LandBasicInfo = {
+            id: data.id,
+            district: data.district || "",
+            taluka: data.taluka || "",
+            village: data.village || "",
+            area: { 
+              value: data.area_value || 0, 
+              unit: data.area_unit || "sq_m",
+              acres: data.area_unit === 'acre' ? data.area_value : undefined,
+              gunthas: data.area_unit === 'guntha' ? data.area_value : undefined,
+              square_meters: data.area_unit === 'sq_m' ? data.area_value : undefined
+            },
+            sNoType: data.s_no_type || "s_no",
+            sNo: data.s_no || "",
+            isPromulgation: isProm,
+            blockNo: data.block_no || "",
+            reSurveyNo: data.re_survey_no || "",
+            integrated712: data.integrated_712 || "",
+            integrated712FileName: data.integrated_712_filename || "",
+            authority: data.authority || "" // Add authority field
+          }
+          setLandData(mappedData)
+        }
+      } catch (error) {
+        console.error('Error fetching land record:', error)
+        toast({ 
+          title: "Error loading land record", 
+          variant: "destructive" 
+        })
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    fetchLandRecord()
+  }, [recordId, toast])
 
   const handleFileDownload = () => {
     if (landData?.integrated712) {
@@ -134,25 +135,34 @@ useEffect(() => {
           </div>
         </div>
 
-{/* Area Display */}
-<div className="space-y-2">
-  <Label className="text-sm font-medium text-muted-foreground">Land Area</Label>
-  <div className="flex items-center gap-4">
-    <p className="text-base font-semibold">
-      {landData.area.value} {landData.area.unit === 'sq_m' ? 'sq meters' : landData.area.unit}
-    </p>
-  </div>
-</div>
+        {/* Area Display */}
+        <div className="space-y-2">
+          <Label className="text-sm font-medium text-muted-foreground">Land Area</Label>
+          <div className="flex items-center gap-4">
+            <p className="text-base font-semibold">
+              {landData.area.value} {landData.area.unit === 'sq_m' ? 'sq meters' : landData.area.unit}
+            </p>
+          </div>
+        </div>
 
         {/* Survey Numbers */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        
           <div className="space-y-2">
             <Label className="text-sm font-medium text-muted-foreground">Block Number</Label>
             <p className="text-base font-semibold">{landData.blockNo}</p>
           </div>
         </div>
 
+        {/* Authority Field */}
+        <div className="space-y-2">
+          <Label className="text-sm font-medium text-muted-foreground">Authority</Label>
+          {landData.authority ? (
+            <p className="text-base font-semibold">{landData.authority}</p>
+          ) : (
+            <p className="text-sm text-gray-500 italic">No authority specified</p>
+          )}
+        </div>
+        
         {/* Promulgation Status */}
         <div className="p-4 border rounded-lg bg-gray-50">
           <div className="space-y-2">

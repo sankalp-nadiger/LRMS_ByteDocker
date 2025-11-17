@@ -10,7 +10,7 @@ import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
 import { Download, Eye, Filter, Calendar, AlertTriangle, Send, X, Loader2, ChevronUp, ChevronDown } from "lucide-react"
 import { useLandRecord } from "@/contexts/land-record-context"
-import { convertToSquareMeters, LandRecordService } from "@/lib/supabase"
+import { convertToSquareMeters, LandRecordService, uploadFile, supabase } from "@/lib/supabase"
 import { useToast } from "@/hooks/use-toast"
 import { useRouter } from "next/navigation"
 import { useUser } from "@clerk/nextjs"
@@ -76,7 +76,7 @@ interface CommentModalProps {
   userRole: string;
   landRecordStatus?: string;
   isPushForReview?: boolean;
-  isMarkReviewComplete?: boolean;
+  isMarkReviewComplete?: boolean; 
 }
 
 const CommentModal = ({ isOpen, onClose, onSubmit, loading = false, step, userRole, landRecordStatus, isPushForReview = false, isMarkReviewComplete = false }: CommentModalProps) => {
@@ -90,15 +90,15 @@ const CommentModal = ({ isOpen, onClose, onSubmit, loading = false, step, userRo
   const { user } = useUser();
   const inputRef = useRef<HTMLInputElement>(null);
 
-
   // Determine the modal title based on user role
   const modalTitle = userRole === 'reviewer'
   ? `Send Message to Manager/Executioner - Step ${step}`
   : userRole === 'executioner'
   ? `Send Message to Manager/Reviewer - Step ${step}`
   : `Send Message to Executioner/Reviewer - Step ${step}`;
+
   // Fetch users when modal opens
-  useEffect(() => {
+ useEffect(() => {
   if (isOpen) {
     const fetchUsers = async () => {
       try {
@@ -274,7 +274,7 @@ const CommentModal = ({ isOpen, onClose, onSubmit, loading = false, step, userRo
             </p>
           </div>
          {userRole === 'reviewer' ? (
-  landRecordStatus === 'review' && ( // ADD THIS CONDITION
+  landRecordStatus === 'review' && ( 
     <div className="flex items-center gap-2 p-3 bg-blue-50 border border-blue-200 rounded-lg">
       <input
         type="checkbox"
@@ -289,7 +289,7 @@ const CommentModal = ({ isOpen, onClose, onSubmit, loading = false, step, userRo
     </div>
   )
 ) : (userRole === 'manager' || userRole === 'admin' || userRole === 'executioner') && (
-  landRecordStatus !== 'review' && ( 
+  landRecordStatus !== 'review' && (
     <div className="flex items-center gap-2 p-3 bg-green-50 border border-green-200 rounded-lg">
       <input
         type="checkbox"
@@ -374,8 +374,8 @@ export default function OutputViews() {
   const [sendingComment, setSendingComment] = useState(false)
   const [landRecordStatus, setLandRecordStatus] = useState<string>('');
 const [isPushForReview, setIsPushForReview] = useState(false)
-const [isMarkReviewComplete, setIsMarkReviewComplete] = useState(false) 
-  
+  const [isMarkReviewComplete, setIsMarkReviewComplete] = useState(false) 
+  const [uploadingDocs, setUploadingDocs] = useState<Record<string, boolean>>({})
   // Fetch land record status
 useEffect(() => {
   const fetchLandRecordStatus = async () => {
@@ -541,6 +541,84 @@ const handleSendComment = async (message: string, recipients: string[], isReview
     setSendingComment(false);
   }
 };
+
+// Handle nondh document upload
+const handleNondhDocUpload = async (nondhId: string, file: File) => {
+  try {
+    setUploadingDocs(prev => ({ ...prev, [`nondh-${nondhId}`]: true }))
+    
+    const uploadedUrl = await uploadFile(file, 'land-documents')
+    
+    if (!uploadedUrl) {
+      throw new Error('Failed to upload document')
+    }
+    
+    // Update nondh table
+    const { error } = await supabase
+      .from('nondhs')
+      .update({ nondh_doc_url: uploadedUrl })
+      .eq('id', nondhId)
+    
+    if (error) throw error
+    
+    toast({
+      title: 'Success',
+      description: 'Nondh document uploaded successfully',
+    })
+    
+    // Refresh data
+    await fetchAllData()
+    
+  } catch (error) {
+    console.error('Error uploading nondh doc:', error)
+    toast({
+      title: 'Error',
+      description: 'Failed to upload nondh document',
+      variant: 'destructive'
+    })
+  } finally {
+    setUploadingDocs(prev => ({ ...prev, [`nondh-${nondhId}`]: false }))
+  }
+}
+
+// Handle relevant document upload
+const handleRelevantDocUpload = async (nondhDetailId: string, file: File) => {
+  try {
+    setUploadingDocs(prev => ({ ...prev, [`relevant-${nondhDetailId}`]: true }))
+    
+    const uploadedUrl = await uploadFile(file, 'land-documents')
+    
+    if (!uploadedUrl) {
+      throw new Error('Failed to upload document')
+    }
+    
+    // Update nondh_details table with BOTH doc_upload_url AND has_documents
+    const { error } = await LandRecordService.updateNondhDetail(nondhDetailId, {
+      doc_upload_url: uploadedUrl,
+      has_documents: true  // ADD THIS LINE
+    })
+    
+    if (error) throw error
+    
+    toast({
+      title: 'Success',
+      description: 'Relevant document uploaded successfully',
+    })
+    
+    // Refresh data
+    await fetchAllData()
+    
+  } catch (error) {
+    console.error('Error uploading relevant doc:', error)
+    toast({
+      title: 'Error',
+      description: 'Failed to upload relevant document',
+      variant: 'destructive'
+    })
+  } finally {
+    setUploadingDocs(prev => ({ ...prev, [`relevant-${nondhDetailId}`]: false }))
+  }
+}
 
 const handleDownloadIntegratedDocument = async () => {
 
@@ -1370,7 +1448,9 @@ const handleExportDateWise = async () => {
     router.push('/land-master')
   }
 
-  const renderQueryListCard = (nondh: NondhDetail, index: number) => {    
+  const renderQueryListCard = (nondh: NondhDetail, index: number) => {
+  const nondhObj = nondhs.find(n => n.id === nondh.nondhId)
+  
   return (
     <Card key={index} className="p-4">
       <div className="space-y-3">
@@ -1406,6 +1486,61 @@ const handleExportDateWise = async () => {
               )}
             </div>
           </div>
+        </div>
+        
+        {/* Upload buttons for mobile */}
+        <div className="flex flex-col gap-2 pt-2">
+          {!nondh.nondhDocUrl && nondhObj && (
+            <label className="cursor-pointer">
+              <input
+                type="file"
+                accept=".pdf,.jpg,.jpeg,.png"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0]
+                  if (file) handleNondhDocUpload(nondhObj.id, file)
+                }}
+                disabled={uploadingDocs[`nondh-${nondhObj.id}`]}
+              />
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={uploadingDocs[`nondh-${nondhObj.id}`]}
+                className="w-full"
+                asChild
+              >
+                <span>
+                  {uploadingDocs[`nondh-${nondhObj.id}`] ? 'Uploading...' : 'Upload Nondh Doc'}
+                </span>
+              </Button>
+            </label>
+          )}
+          
+          {!nondh.docUploadUrl && (
+            <label className="cursor-pointer">
+              <input
+                type="file"
+                accept=".pdf,.jpg,.jpeg,.png"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0]
+                  if (file) handleRelevantDocUpload(nondh.id, file)
+                }}
+                disabled={uploadingDocs[`relevant-${nondh.id}`]}
+              />
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={uploadingDocs[`relevant-${nondh.id}`]}
+                className="w-full"
+                asChild
+              >
+                <span>
+                  {uploadingDocs[`relevant-${nondh.id}`] ? 'Uploading...' : 'Upload Relevant Docs'}
+                </span>
+              </Button>
+            </label>
+          )}
         </div>
       </div>
     </Card>
@@ -1776,8 +1911,8 @@ const handleExportDateWise = async () => {
             <TableHead className="w-1/4">Area Alloted</TableHead>
           </TableRow>
         </TableHeader>
-        <TableBody>
-          {yearSlabs.map((slab) => {
+       <TableBody>
+  {[...yearSlabs].sort((a, b) => a.startYear - b.startYear).map((slab) => {
             const slabPanipatraks = panipatraks.filter(p => p.slabId === slab.id);
             const periods = getYearPeriods(slab.startYear, slab.endYear);
             const hasSameForAll = slabPanipatraks.length > 0 && 
@@ -1882,10 +2017,12 @@ const handleExportDateWise = async () => {
     <TableHead>Nondh</TableHead>
     <TableHead>Relevant Docs Available</TableHead>
     <TableHead>Relevant Docs</TableHead>
+    <TableHead>Actions</TableHead>
   </TableRow>
 </TableHeader>
-                    <TableBody>
+                   <TableBody>
   {filteredNondhs.map((nondh, index) => {
+    const nondhObj = nondhs.find(n => n.id === nondh.nondhId)
     return (
       <TableRow key={index}>
         <TableCell>{nondh.nondhNumber}</TableCell>
@@ -1898,7 +2035,7 @@ const handleExportDateWise = async () => {
             <span className="text-red-600 font-medium">N/A</span>
           )}
         </TableCell>
-        <TableCell>{nondh.hasDocuments ? "Yes" : "No"}</TableCell>
+        <TableCell className="text-center">{nondh.hasDocuments ? "Yes" : "No"}</TableCell>
         <TableCell className={nondh.hasDocuments && !nondh.docUploadUrl ? 'bg-yellow-100' : ''}>
           {nondh.hasDocuments ? (
             nondh.docUploadUrl ? (
@@ -1911,8 +2048,73 @@ const handleExportDateWise = async () => {
               </div>
             )
           ) : (
-            "N/A"
+            <div className="flex items-center justify-center">
+                <span className="text-medium">N/A</span>
+              </div>
           )}
+        </TableCell>
+        <TableCell>
+          <div className="flex gap-2">
+            {/* Nondh Doc Upload */}
+            {!nondh.nondhDocUrl && nondhObj && (
+              <label className="cursor-pointer">
+                <input
+                  type="file"
+                  accept=".pdf,.jpg,.jpeg,.png"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0]
+                    if (file) handleNondhDocUpload(nondhObj.id, file)
+                  }}
+                  disabled={uploadingDocs[`nondh-${nondhObj.id}`]}
+                />
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={uploadingDocs[`nondh-${nondhObj.id}`]}
+                  asChild
+                >
+                  <span className="flex items-center gap-1">
+                    {uploadingDocs[`nondh-${nondhObj.id}`] ? (
+                      <Loader2 className="w-3 h-3 animate-spin" />
+                    ) : (
+                      'Upload Nondh'
+                    )}
+                  </span>
+                </Button>
+              </label>
+            )}
+            
+            {/* Relevant Doc Upload */}
+            {!nondh.docUploadUrl && (
+              <label className="cursor-pointer">
+                <input
+                  type="file"
+                  accept=".pdf,.jpg,.jpeg,.png"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0]
+                    if (file) handleRelevantDocUpload(nondh.id, file)
+                  }}
+                  disabled={uploadingDocs[`relevant-${nondh.id}`]}
+                />
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={uploadingDocs[`relevant-${nondh.id}`]}
+                  asChild
+                >
+                  <span className="flex items-center gap-1">
+                    {uploadingDocs[`relevant-${nondh.id}`] ? (
+                      <Loader2 className="w-3 h-3 animate-spin" />
+                    ) : (
+                      'Upload Relevant Doc'
+                    )}
+                  </span>
+                </Button>
+              </label>
+            )}
+          </div>
         </TableCell>
       </TableRow>
     );
@@ -2103,21 +2305,20 @@ const handleExportDateWise = async () => {
     </Button>
   )
   ) : (role === 'manager' || role === 'admin' || role === 'executioner') && (
-    landRecordStatus !== 'review' && (
-      <Button 
-        onClick={() => {
-          setIsMarkReviewComplete(false);
-          setIsPushForReview(true);
-          setShowCommentModal(true);
-        }}
-        className="w-full sm:w-auto flex items-center gap-2"
-        size="sm"
-      >
-        Add comment & Push for Review
-      </Button>
-    )
-  )}
-
+  landRecordStatus !== 'review' && (
+    <Button 
+      onClick={() => {
+        setIsPushForReview(true); // SET THIS BEFORE OPENING MODAL
+        setIsMarkReviewComplete(false);
+        setShowCommentModal(true);
+      }}
+      className="w-full sm:w-auto flex items-center gap-2"
+      size="sm"
+    >
+      Add comment & Push for Review
+    </Button>
+  )
+)}
   {/* END NEW SECTION */}
   {(role === 'manager' || role === 'admin' || role === 'reviewer' || role === 'executioner') && (
     <Button 
@@ -2161,7 +2362,7 @@ const handleExportDateWise = async () => {
           step={6}
           userRole={role || ''}
           landRecordStatus={landRecordStatus} 
-          isPushForReview={isPushForReview} 
+          isPushForReview={isPushForReview}
           isMarkReviewComplete={isMarkReviewComplete}
         />
       )}

@@ -37,7 +37,8 @@ const initialFormData: LandBasicInfo = {
   blockNo: "",
   reSurveyNo: "",
   integrated712: "",
-  integrated712FileName: ""
+  integrated712FileName: "",
+  authority: "" 
 }
 
 function isEqual(obj1: any, obj2: any) {
@@ -734,7 +735,8 @@ useEffect(() => {
           blockNo: data.block_no || "",
           reSurveyNo: data.re_survey_no || "",
           integrated712: data.integrated_712 || "",
-          integrated712FileName: data.integrated_712_filename || ""
+          integrated712FileName: data.integrated_712_filename || "",
+           authority: data.authority || "" 
         }
         
         setFormData(mappedData)
@@ -976,6 +978,7 @@ useEffect(() => {
         integrated_712: formData.integrated712 || null,
         integrated_712_filename: formData.integrated712FileName || null,
         status: 'drafting',
+          authority: formData.authority || null,  
         updated_at: new Date().toISOString()
       }
 
@@ -1135,6 +1138,17 @@ useEffect(() => {
     </div>
   </div>
 )}
+
+{/* Authority Field */}
+<div className="space-y-2">
+  <Label htmlFor="authority">Authority</Label>
+  <Input
+    id="authority"
+    value={formData.authority}
+    onChange={(e) => updateFormField({ authority: e.target.value })}
+    placeholder="Enter Authority"
+  />
+</div>
 
           {/* Document Upload */}
           <div className="space-y-2">

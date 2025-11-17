@@ -37,7 +37,9 @@ const initialFormData: LandBasicInfo = {
   blockNo: "",
   reSurveyNo: "",
   integrated712: "",
-  integrated712FileName: ""
+  integrated712FileName: "",
+  addedBy: "",
+  authority: "" 
 }
 
 function isEqual(obj1: any, obj2: any) {
@@ -52,6 +54,7 @@ interface ValidationErrors {
   reSurveyNo?: string
   integrated712?: string
   area?: string
+  authority?: string
 }
 
 interface AreaFieldsProps {
@@ -685,7 +688,6 @@ const CommentModal = ({ isOpen, onClose, onSubmit, loading = false, step, onClos
   );
 };
 
-
 export default function LandBasicInfoComponent() {
   const { 
     landBasicInfo, 
@@ -1013,6 +1015,8 @@ const validateForm = (): boolean => {
         re_survey_no: formData.reSurveyNo || null,
         integrated_712: formData.integrated712 || null,
         integrated_712_filename: formData.integrated712FileName || null,
+        authority: formData.authority, 
+      added_by: user?.primaryEmailAddress?.emailAddress || "",
         current_step: 1,
         status: 'initiated'
       }
@@ -1041,7 +1045,9 @@ const validateForm = (): boolean => {
         blockNo: formData.blockNo, 
         reSurveyNo: formData.reSurveyNo, 
         integrated712: formData.integrated712,
-        integrated712FileName: formData.integrated712FileName
+        integrated712FileName: formData.integrated712FileName,
+         authority: formData.authority, 
+  addedBy: user?.primaryEmailAddress?.emailAddress || "" 
       }
 
       setLandBasicInfo(updatedInfo)
@@ -1214,6 +1220,21 @@ const handleCloseDuplicateDialog = () => {
               </div>
             </div>
           )}
+
+{/* Authority Field */}
+<div className="space-y-2">
+  <Label htmlFor="authority">Authority</Label>
+  <Input
+    id="authority"
+    value={formData.authority || ""}
+    onChange={(e) => updateFormField({ authority: e.target.value })}
+    placeholder="Enter Authority Name"
+    className={validationErrors.authority ? "border-red-500" : ""}
+  />
+  {validationErrors.authority && (
+    <p className="text-sm text-red-600">{validationErrors.authority}</p>
+  )}
+</div>
 
           {/* Document Upload */}
           <div className="space-y-2">
