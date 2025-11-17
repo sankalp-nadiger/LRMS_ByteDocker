@@ -862,7 +862,7 @@ const handleNavigateToDuplicate = (mode: 'edit' | 'view') => {
               ? JSON.stringify(detail.affectedNondhDetails.map(a => ({
                   nondhNo: a.nondhNo,
                   status: mapStatusFromJSON(a.status),
-                  invalidReason: mapStatusFromJSON(a.status) === "invalid" ? (a.invalidReason || "NA") : null
+                  invalidReason: a.invalidReason || "NA"
                 })))
               : null,
             ganot: detail.hukamType === "ALT Krushipanch" ? detail.ganotType : null,
