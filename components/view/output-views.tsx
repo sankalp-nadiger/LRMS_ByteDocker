@@ -556,7 +556,10 @@ const handleNondhDocUpload = async (nondhId: string, file: File) => {
     // Update nondh table
     const { error } = await supabase
       .from('nondhs')
-      .update({ nondh_doc_url: uploadedUrl })
+      .update({ 
+        nondh_doc_url: uploadedUrl,
+        nondh_doc_filename: file.name
+      })
       .eq('id', nondhId)
     
     if (error) throw error
