@@ -247,7 +247,7 @@ const LandRecordJSONUploadContent = () => {
     ],
     nondhDetails: [
       {
-        nondhNumber: "1",
+        nondhNumber: "4",
         type: "Kabjedaar",
         date: "15012015",
         vigat: "Initial possession entry",
@@ -271,7 +271,7 @@ const LandRecordJSONUploadContent = () => {
         ]
       },
       {
-        nondhNumber: "2",
+        nondhNumber: "3",
         type: "Varsai",
         date: "20052018",
         vigat: "Transfer from Owner 1 to new owners",
@@ -297,7 +297,7 @@ const LandRecordJSONUploadContent = () => {
         ]
       },
       {
-        nondhNumber: "3",
+        nondhNumber: "1",
         type: "Hukam",
         date: "10032019",
         hukamDate: "05032019",
@@ -305,6 +305,7 @@ const LandRecordJSONUploadContent = () => {
         restrainingOrder: "no",
         vigat: "Court order regarding land dispute",
         status: "Radd",
+        invalidReason: "Plain",
         showInOutput: true,
         affectedNondhDetails: [
           {
@@ -388,7 +389,7 @@ const LandRecordJSONUploadContent = () => {
         ]
       },
       {
-        nondhNumber: "7",
+        nondhNumber: "1",
         type: "Bojo",
         date: "25052022",
         vigat: "Load entry",
@@ -854,7 +855,7 @@ const handleNavigateToDuplicate = (mode: 'edit' | 'view') => {
             vigat: detail.vigat,
             tenure: detail.tenure || 'Navi',
             status: mappedStatus,
-            invalid_reason: mappedStatus === "invalid" ? (detail.invalidReason || "NA") : null,
+            invalid_reason: detail.invalidReason || null,
             show_in_output: detail.showInOutput !== false,
             old_owner: detail.oldOwner || null,
             affected_nondh_details: detail.affectedNondhDetails && detail.affectedNondhDetails.length > 0
