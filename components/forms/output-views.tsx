@@ -1664,6 +1664,7 @@ const getYearPeriods = (startYear: number, endYear: number) => {
     <TabsTrigger value="date-wise" className="text-xs sm:text-sm">Date-wise</TabsTrigger>
   </TabsList>
 
+{/* Panipatraks Tab */}
 <TabsContent value="panipatraks" className="space-y-4">
   <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-4">
     <h3 className="text-base sm:text-lg font-semibold">
@@ -1695,7 +1696,7 @@ const getYearPeriods = (startYear: number, endYear: number) => {
           </TableRow>
         </TableHeader>
         <TableBody>
-          {yearSlabs.map((slab) => {
+          {[...yearSlabs].sort((a, b) => a.startYear - b.startYear).map((slab) => {
   const slabPanipatraks = panipatraksState.filter(p => p.slabId === slab.id);
             const periods = getYearPeriods(slab.startYear, slab.endYear);
             const hasSameForAll = slabPanipatraks.length > 0 && 
