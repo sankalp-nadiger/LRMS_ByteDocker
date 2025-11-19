@@ -1,4 +1,4 @@
-import { convertToSquareMeters } from './supabase';
+import { convertToSquareMeters, convertFromSquareMetres } from './supabase';
 import * as XLSX from 'xlsx-js-style';
 
 interface ProjectExportData {
@@ -52,8 +52,8 @@ export const exportPanipatraksToExcel = async (
               ? farmer.area.value 
               : convertToSquareMeters(farmer.area.value, "sq_m");
             
-            const acres = convertToSquareMeters(areaInSqM, "acre");
-            const guntha = convertToSquareMeters(areaInSqM, "guntha") % 40;
+            const acres = convertFromSquareMeters(areaInSqM, "acre");
+            const guntha = convertFromSquareMeters(areaInSqM, "guntha") % 40;
             const areaDisplay = `${Math.round(areaInSqM * 100) / 100} sq.m (${Math.floor(acres)} acre ${Math.round(guntha)} guntha)`;
 
             wsData.push([
