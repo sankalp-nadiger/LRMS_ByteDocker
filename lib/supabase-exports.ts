@@ -37,7 +37,7 @@ export const exportPanipatraksToExcel = async (
     ];
 
     // Add panipatrak data in table format - sort by start year ascending
-[...yearSlabs].sort((a, b) => a.startYear - b.startYear).forEach((slab) => {
+    [...yearSlabs].sort((a, b) => a.startYear - b.startYear).forEach((slab) => {
       const slabPanipatraks = panipatraksData.filter(p => p.slabId === slab.id);
       const periods = getYearPeriods(slab.startYear, slab.endYear);
       const hasSameForAll = slabPanipatraks.length > 0 && 
@@ -48,13 +48,17 @@ export const exportPanipatraksToExcel = async (
         const firstPeriodData = slabPanipatraks.find(p => p.year === periods[0]?.from);
         if (firstPeriodData && firstPeriodData.farmers) {
           firstPeriodData.farmers.forEach((farmer: any, index: number) => {
+            // Convert to square meters first
             const areaInSqM = farmer.area.unit === "sq_m" 
               ? farmer.area.value 
-              : convertToSquareMeters(farmer.area.value, "sq_m");
+              : convertToSquareMeters(farmer.area.value, farmer.area.unit);
             
-            const acres = convertFromSquareMeters(areaInSqM, "acre");
-            const guntha = convertFromSquareMeters(areaInSqM, "guntha") % 40;
-            const areaDisplay = `${Math.round(areaInSqM * 100) / 100} sq.m (${Math.floor(acres)} acre ${Math.round(guntha)} guntha)`;
+            // Convert from sq meters to acres and guntha
+            const totalGuntha = areaInSqM / 101.17; // Total guntha
+            const acres = Math.floor(totalGuntha / 40); // 40 guntha = 1 acre
+            const guntha = Math.round(totalGuntha % 40); // Remaining guntha
+            
+            const areaDisplay = `${Math.round(areaInSqM * 100) / 100} sq.m (${acres} acre ${guntha} guntha)`;
 
             wsData.push([
               index === 0 ? `${slab.startYear}-${slab.endYear}` : '', // Show year only for first row
@@ -69,13 +73,17 @@ export const exportPanipatraksToExcel = async (
           const periodData = slabPanipatraks.find(p => p.year === period.from);
           if (periodData && periodData.farmers) {
             periodData.farmers.forEach((farmer: any, index: number) => {
+              // Convert to square meters first
               const areaInSqM = farmer.area.unit === "sq_m" 
                 ? farmer.area.value 
-                : convertToSquareMeters(farmer.area.value, "sq_m");
+                : convertToSquareMeters(farmer.area.value, farmer.area.unit);
               
-              const acres = convertToSquareMeters(areaInSqM, "acre");
-              const guntha = convertToSquareMeters(areaInSqM, "guntha") % 40;
-              const areaDisplay = `${Math.round(areaInSqM * 100) / 100} sq.m (${Math.floor(acres)} acre ${Math.round(guntha)} guntha)`;
+              // Convert from sq meters to acres and guntha
+              const totalGuntha = areaInSqM / 101.17; // Total guntha
+              const acres = Math.floor(totalGuntha / 40); // 40 guntha = 1 acre
+              const guntha = Math.round(totalGuntha % 40); // Remaining guntha
+              
+              const areaDisplay = `${Math.round(areaInSqM * 100) / 100} sq.m (${acres} acre ${guntha} guntha)`;
 
               wsData.push([
                 index === 0 ? period.period : '', // Show year only for first row
