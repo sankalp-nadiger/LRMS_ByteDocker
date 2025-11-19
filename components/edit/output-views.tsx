@@ -1750,7 +1750,7 @@ const handleExportDateWise = async () => {
                 <TableHead className="w-[300px]">Vigat</TableHead>
                 <TableHead className="w-32">Affected S.No</TableHead>
                 <TableHead className="w-28 text-center">Status</TableHead>
-                <TableHead className="w-48">Reason</TableHead>
+                <TableHead className="w-[300px]">Reason</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
