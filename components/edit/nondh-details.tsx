@@ -4497,15 +4497,16 @@ const formatArea = (area: { value: number; unit: string }) => {
   <Label>
     Reason {detail.status === "invalid" ? "*" : "(Optional)"}
   </Label>
-  <Input
-    value={detail.invalidReason}
-    onChange={(e) => updateNondhDetail(detail.id, { invalidReason: e.target.value })}
-    placeholder={
-      detail.status === "invalid" 
-        ? "Enter reason for invalidation" 
-        : "Enter reason (optional)"
-    }
-  />
+  <Textarea
+  value={detail.invalidReason || ''}
+  onChange={(e) => updateNondhDetail(detail.id, { invalidReason: e.target.value })}
+  placeholder={
+    detail.status === "invalid" 
+      ? "Enter reason for invalidation" 
+      : "Enter reason (optional)"
+  }
+  rows={3}
+/>
 </div>
                         </div>
                       </div>
