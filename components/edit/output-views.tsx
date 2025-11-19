@@ -1740,7 +1740,7 @@ const handleExportDateWise = async () => {
       <>
         {/* Desktop Table */}
         <div className="hidden lg:block rounded-md border overflow-x-auto">
-          <Table>
+          <Table className="table-fixed w-full">
             <TableHeader>
               <TableRow>
                 <TableHead className="w-20">Nondh No.</TableHead>
