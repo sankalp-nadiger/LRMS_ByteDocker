@@ -187,24 +187,51 @@ const handleExportToExcel = async () => {
     
     // Process cluster projects
     const clusterProjects = projects.filter(p => !p.is_individual);
+    
     for (const project of clusterProjects) {
       const projectLandRecords = landRecords.filter(record =>
         project.land_record_ids?.includes(record.id)
       );
       
-      for (const record of projectLandRecords) {
+      if (projectLandRecords.length > 0) {
+        // Add project lands
+        for (const record of projectLandRecords) {
+          exportData.push({
+            projectName: project.name,
+            district: record.district,
+            taluk: record.taluka,
+            village: record.village,
+            blockNo: record.block_no,
+            resurveyNo: record.resurvey_no || 'N/A',
+            status: record.status === 'review2' ? 'External Review' : 
+                    record.status.charAt(0).toUpperCase() + record.status.slice(1)
+          });
+        }
+      } else {
+        // Project has no lands - add project name only
         exportData.push({
           projectName: project.name,
-          district: record.district,
-          taluk: record.taluka,
-          village: record.village,
-          blockNo: record.block_no,
-          resurveyNo: record.resurvey_no || 'N/A',
-          status: record.status === 'review2' ? 'External Review' : 
-                  record.status.charAt(0).toUpperCase() + record.status.slice(1)
+          district: '',
+          taluk: '',
+          village: '',
+          blockNo: '',
+          resurveyNo: '',
+          status: ''
         });
       }
     }
+    
+    // Add "Individual Projects" header
+    exportData.push({
+      projectName: 'INDIVIDUAL PROJECTS',
+      district: '',
+      taluk: '',
+      village: '',
+      blockNo: '',
+      resurveyNo: '',
+      status: '',
+      isHeader: true // Flag to identify this as a header row
+    });
     
     // Process individual land records (not in any cluster)
     const individualProjects = projects.filter(p => p.is_individual);
@@ -230,7 +257,7 @@ const handleExportToExcel = async () => {
     alert('Failed to export data. Please try again.');
   }
 };
-
+  
  const handleRemoveLandRecord = async (landRecordId: string) => {
   if (!selectedProject || selectedProject.is_individual) return;
 
