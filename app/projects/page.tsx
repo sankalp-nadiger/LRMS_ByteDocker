@@ -202,7 +202,7 @@ const handleExportToExcel = async () => {
             taluk: record.taluka,
             village: record.village,
             blockNo: record.block_no,
-            resurveyNo: record.resurvey_no || 'N/A',
+           resurveyNo: record.re_survey_no || 'N/A',
             status: record.status === 'review2' ? 'External Review' : 
                     record.status.charAt(0).toUpperCase() + record.status.slice(1)
           });
@@ -244,7 +244,7 @@ const handleExportToExcel = async () => {
           taluk: record.taluka,
           village: record.village,
           blockNo: record.block_no,
-          resurveyNo: record.resurvey_no || 'N/A',
+         resurveyNo: record.re_survey_no || 'N/A',
           status: record.status === 'review2' ? 'External Review' : 
                   record.status.charAt(0).toUpperCase() + record.status.slice(1)
         });
