@@ -9,6 +9,7 @@ interface ProjectExportData {
   blockNo: string;
   resurveyNo: string;
   status: string;
+  isHeader?: boolean;
 }
 
 // Base export function for Panipatraks
@@ -494,7 +495,20 @@ export const exportProjectsToExcel = async (data: ProjectExportData[]) => {
     }
   };
 
-  // Apply header styles
+  // Individual Projects header styling (centered across all columns)
+  const individualHeaderStyle = {
+    font: { bold: true, sz: 14, color: { rgb: "FFFFFF" } },
+    fill: { fgColor: { rgb: "059669" } }, // Green color
+    alignment: { horizontal: "center", vertical: "center" },
+    border: {
+      top: { style: "medium", color: { rgb: "000000" } },
+      bottom: { style: "medium", color: { rgb: "000000" } },
+      left: { style: "medium", color: { rgb: "000000" } },
+      right: { style: "medium", color: { rgb: "000000" } }
+    }
+  };
+
+  // Apply header styles (first row)
   const headerCells = ['A1', 'B1', 'C1', 'D1', 'E1', 'F1', 'G1'];
   headerCells.forEach(cell => {
     if (ws[cell]) {
@@ -504,18 +518,37 @@ export const exportProjectsToExcel = async (data: ProjectExportData[]) => {
 
   // Apply data styles
   for (let row = 2; row <= data.length + 1; row++) {
-    const cells = ['A', 'B', 'C', 'D', 'E', 'F', 'G'];
-    cells.forEach((col, index) => {
-      const cellRef = `${col}${row}`;
+    const dataIndex = row - 2;
+    const isIndividualHeader = data[dataIndex]?.isHeader;
+    
+    if (isIndividualHeader) {
+      // Merge cells for "Individual Projects" header
+      if (!ws['!merges']) ws['!merges'] = [];
+      ws['!merges'].push({
+        s: { r: row - 1, c: 0 }, // Start: row, column A
+        e: { r: row - 1, c: 6 }  // End: same row, column G
+      });
+      
+      // Apply special styling to the merged header
+      const cellRef = `A${row}`;
       if (ws[cellRef]) {
-        // Apply project name style if it has a value (cluster project)
-        if (index === 0 && ws[cellRef].v) {
-          ws[cellRef].s = projectNameStyle;
-        } else {
-          ws[cellRef].s = dataStyle;
-        }
+        ws[cellRef].s = individualHeaderStyle;
       }
-    });
+    } else {
+      // Apply regular styles
+      const cells = ['A', 'B', 'C', 'D', 'E', 'F', 'G'];
+      cells.forEach((col, index) => {
+        const cellRef = `${col}${row}`;
+        if (ws[cellRef]) {
+          // Apply project name style if it has a value (cluster project)
+          if (index === 0 && ws[cellRef].v) {
+            ws[cellRef].s = projectNameStyle;
+          } else {
+            ws[cellRef].s = dataStyle;
+          }
+        }
+      });
+    }
   }
 
   // Set column widths
@@ -537,7 +570,7 @@ export const exportProjectsToExcel = async (data: ProjectExportData[]) => {
 
   // Generate filename with timestamp
   const now = new Date();
-const timestamp = `${String(now.getDate()).padStart(2, '0')}-${String(now.getMonth() + 1).padStart(2, '0')}-${now.getFullYear()}`;
+  const timestamp = `${String(now.getDate()).padStart(2, '0')}-${String(now.getMonth() + 1).padStart(2, '0')}-${now.getFullYear()}`;
   const filename = `projects_export_${timestamp}.xlsx`;
 
   // Write file
