@@ -737,14 +737,23 @@ export default function ProjectsPage() {
           )}
         </div>
         {!selectedProject.is_individual && (
-          <button
-            onClick={openEditForm}
-            className="flex items-center gap-2 px-3 py-2 text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-lg transition-colors"
-          >
-            <Edit className="h-4 w-4" />
-            Edit
-          </button>
-        )}
+  <div className="flex gap-2">
+    <button
+      onClick={openEditForm}
+      className="flex items-center gap-2 px-3 py-2 text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-lg transition-colors"
+    >
+      <Edit className="h-4 w-4" />
+      Edit
+    </button>
+    <button
+      onClick={openDeleteConfirm}
+      className="flex items-center gap-2 px-3 py-2 text-red-600 hover:text-red-800 hover:bg-red-50 rounded-lg transition-colors"
+    >
+      <Trash2 className="h-4 w-4" />
+      Delete
+    </button>
+  </div>
+)}
       </div>
       {selectedProject.description && (
         <p className="text-gray-600 mb-4">{selectedProject.description}</p>
