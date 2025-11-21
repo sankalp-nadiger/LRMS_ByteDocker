@@ -194,10 +194,10 @@ const handleExportToExcel = async () => {
       );
       
       if (projectLandRecords.length > 0) {
-        // Add project lands
-        for (const record of projectLandRecords) {
+        // Add project lands - only show project name for first land
+        projectLandRecords.forEach((record, index) => {
           exportData.push({
-            projectName: project.name,
+            projectName: index === 0 ? project.name : '', // Only show name for first record
             district: record.district,
             taluk: record.taluka,
             village: record.village,
@@ -206,7 +206,7 @@ const handleExportToExcel = async () => {
             status: record.status === 'review2' ? 'External Review' : 
                     record.status.charAt(0).toUpperCase() + record.status.slice(1)
           });
-        }
+        });
       } else {
         // Project has no lands - add project name only
         exportData.push({
