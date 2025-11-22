@@ -342,42 +342,34 @@ useEffect(() => {
   const loadData = async () => {
     try {
       setInitialLoading(true);
-      if (!slabs.length) {
-        setSlabs([{
-          id: "1",
-          startYear: 1900,
-          endYear: 2004,
-          sNoTypeUI: "block_no",
-          sNo: getAutoPopulatedSNoData(landBasicInfo, "block_no"),
-          areaUI: landBasicInfo?.area ? toAreaUI(landBasicInfo.area) : { 
-            areaType: "acre_guntha", 
-            acre: 0, 
-            guntha: 0 
-          },
-          integrated712: "",
-          paiky: false,
-          paikyCount: 0,
-          paikyEntries: [],
-          ekatrikaran: false,
-          ekatrikaranCount: 0,
-          ekatrikaranEntries: [],
-          collapsed: false
-        }]);
-        
-      }
+      
+      // 1. First priority: Check for step data (unsaved changes)
       const stepData = getStepData();
       
-      if (stepData?.slabUploadedFileNames) {
-        setSlabUploadedFileNames(stepData.slabUploadedFileNames);
-      }
-      if (stepData?.entryUploadedFileNames) {
-        setEntryUploadedFileNames(stepData.entryUploadedFileNames);
+      if (stepData?.yearSlabs && stepData.yearSlabs.length > 0) {
+        // User has unsaved changes - restore them
+        const uiSlabs = stepData.yearSlabs.map(s => ({
+          ...toYearSlabUI(s),
+          collapsed: false
+        }));
+        setSlabs(uiSlabs);
+        
+        // Also restore filename states
+        if (stepData.slabUploadedFileNames) {
+          setSlabUploadedFileNames(stepData.slabUploadedFileNames);
+        }
+        if (stepData.entryUploadedFileNames) {
+          setEntryUploadedFileNames(stepData.entryUploadedFileNames);
+        }
+        
+        return; // Exit early - don't fetch from DB
       }
       
+      // 2. Second priority: Fetch from database (saved data)
       if (landBasicInfo?.id) {
         const { data: dbSlabs, error } = await LandRecordService.getYearSlabs(landBasicInfo.id);
         
-        if (!error && dbSlabs) {
+        if (!error && dbSlabs && dbSlabs.length > 0) {
           const uiSlabs = dbSlabs.map(s => ({
             ...toYearSlabUI(s),
             collapsed: false
@@ -386,44 +378,68 @@ useEffect(() => {
           setSlabs(uiSlabs);
           
           // Extract filenames from database data
-const newSlabFileNames = {};
-const newEntryFileNames = {};
+          const newSlabFileNames = {};
+          const newEntryFileNames = {};
 
-uiSlabs.forEach(slab => {
-  // Extract filename for main slab document
-  if (slab.integrated712) {
-    const filename = extractFilenameFromUrl(slab.integrated712);
-    if (filename) {
-      newSlabFileNames[slab.id] = filename;
-    }
-  }
-  
-  // Extract filenames for paiky entries
-  slab.paikyEntries?.forEach((entry, index) => {
-    if (entry.integrated712) {
-      const filename = extractFilenameFromUrl(entry.integrated712);
-      if (filename) {
-        newEntryFileNames[`${slab.id}_paiky_${index}`] = filename;
-      }
-    }
-  });
-  
-  // Extract filenames for ekatrikaran entries
-  slab.ekatrikaranEntries?.forEach((entry, index) => {
-    if (entry.integrated712) {
-      const filename = extractFilenameFromUrl(entry.integrated712);
-      if (filename) {
-        newEntryFileNames[`${slab.id}_ekatrikaran_${index}`] = filename;
-      }
-    }
-  });
-});
+          uiSlabs.forEach(slab => {
+            // Extract filename for main slab document
+            if (slab.integrated712) {
+              const filename = extractFilenameFromUrl(slab.integrated712);
+              if (filename) {
+                newSlabFileNames[slab.id] = filename;
+              }
+            }
+            
+            // Extract filenames for paiky entries
+            slab.paikyEntries?.forEach((entry, index) => {
+              if (entry.integrated712) {
+                const filename = extractFilenameFromUrl(entry.integrated712);
+                if (filename) {
+                  newEntryFileNames[`${slab.id}_paiky_${index}`] = filename;
+                }
+              }
+            });
+            
+            // Extract filenames for ekatrikaran entries
+            slab.ekatrikaranEntries?.forEach((entry, index) => {
+              if (entry.integrated712) {
+                const filename = extractFilenameFromUrl(entry.integrated712);
+                if (filename) {
+                  newEntryFileNames[`${slab.id}_ekatrikaran_${index}`] = filename;
+                }
+              }
+            });
+          });
 
-// Merge with existing filename states
-setSlabUploadedFileNames(prev => ({ ...newSlabFileNames, ...prev }));
-setEntryUploadedFileNames(prev => ({ ...newEntryFileNames, ...prev }));
+          setSlabUploadedFileNames(newSlabFileNames);
+          setEntryUploadedFileNames(newEntryFileNames);
+          
+          return; // Exit early - we have DB data
         }
       }
+      
+      // 3. Last resort: Create default slab (no step data, no DB data)
+      setSlabs([{
+        id: "1",
+        startYear: 1900,
+        endYear: 2004,
+        sNoTypeUI: "block_no",
+        sNo: getAutoPopulatedSNoData(landBasicInfo, "block_no"),
+        areaUI: landBasicInfo?.area ? toAreaUI(landBasicInfo.area) : { 
+          areaType: "acre_guntha", 
+          acre: 0, 
+          guntha: 0 
+        },
+        integrated712: "",
+        paiky: false,
+        paikyCount: 0,
+        paikyEntries: [],
+        ekatrikaran: false,
+        ekatrikaranCount: 0,
+        ekatrikaranEntries: [],
+        collapsed: false
+      }]);
+      
     } finally {
       setInitialLoading(false);
     }
